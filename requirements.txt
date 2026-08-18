@@ -1,0 +1,15 @@
+fastapi 
+modal 
+numpy 
+ollama 
+pillow 
+pymupdf 
+python-dotenv 
+python-multipart 
+scikit-learn 
+torch 
+torchvision 
+tqdm 
+transformers 
+uvicorn 
+httpx
