@@ -1,0 +1,65 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# OCR / generated files
+output/
+outputs/
+results/
+uploads/
+processed/
+*.pdf
+*.png
+*.jpg
+*.jpeg
+
+# Model files
+models/
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.bin
+
+# Cache
+.cache/
+.cache*
+
+# Datasets
+data/
+dataset/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
