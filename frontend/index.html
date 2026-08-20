@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PNRC OCR</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #000000;
+    --border: #000000;
+    --muted: #666666;
+    --hover: #f0f0f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.4;
+  }
+  header {
+    border-bottom: 2px solid var(--border);
+    padding: 20px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  header h1 {
+    font-size: 18px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    margin: 0;
+  }
+  main {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 24px;
+  }
+  .row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+  label {
+    display: block;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  input[type="text"] {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--fg);
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .field { flex: 1; min-width: 240px; }
+  .dropzone {
+    border: 2px dashed var(--border);
+    padding: 28px;
+    text-align: center;
+    cursor: pointer;
+    margin-bottom: 14px;
+  }
+  .dropzone.drag { background: var(--hover); }
+  .dropzone p { margin: 4px 0; }
+  .dropzone .hint { font-size: 12px; color: var(--muted); }
+  input[type="file"] { display: none; }
+  .filelist {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 14px;
+    border: 1px solid var(--border);
+  }
+  .filelist li {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .filelist li:last-child { border-bottom: none; }
+  .filelist button {
+    background: none;
+    border: none;
+    color: var(--fg);
+    cursor: pointer;
+    font-size: 13px;
+    text-decoration: underline;
+  }
+  .actions { display: flex; gap: 10px; margin-bottom: 24px; }
+  button.primary, button.secondary {
+    padding: 10px 18px;
+    border: 1px solid var(--border);
+    background: var(--fg);
+    color: var(--bg);
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+  }
+  button.secondary {
+    background: var(--bg);
+    color: var(--fg);
+  }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.primary:hover:not(:disabled) { background: #222; }
+  button.secondary:hover:not(:disabled) { background: var(--hover); }
+
+  .job {
+    border: 1px solid var(--border);
+    margin-bottom: 14px;
+  }
+  .job-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    cursor: pointer;
+    gap: 10px;
+  }
+  .job-head:hover { background: var(--hover); }
+  .job-name { font-weight: 600; font-size: 14px; word-break: break-all; }
+  .badge {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border: 1px solid var(--border);
+    padding: 2px 8px;
+    white-space: nowrap;
+  }
+  .badge.queued, .badge.running { color: var(--muted); border-color: var(--muted); }
+  .badge.completed { background: var(--fg); color: var(--bg); }
+  .badge.error { background: var(--fg); color: var(--bg); text-decoration: line-through; }
+  .job-controls { display: flex; align-items: center; gap: 8px; }
+  .view-btn {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--fg);
+    padding: 3px 9px;
+    cursor: pointer;
+    display: none;
+  }
+  .view-btn.show { display: inline-block; }
+  .view-btn:hover { background: var(--hover); }
+  .job-body { padding: 0 14px 14px; display: none; }
+  .job-body.open { display: block; }
+  .stepper {
+    display: flex;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .step {
+    flex: 1;
+    padding: 7px 6px;
+    text-align: center;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--muted);
+    border-right: 1px solid var(--border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .step:last-child { border-right: none; }
+  .step.done { background: var(--fg); color: var(--bg); }
+  .step.active { background: var(--hover); color: var(--fg); font-weight: 700; }
+  .step.error { background: var(--fg); color: var(--bg); text-decoration: line-through; }
+  .bar-track {
+    height: 3px;
+    background: var(--hover);
+  }
+  .bar-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--fg);
+    transition: width 0.25s ease;
+  }
+  .metrics {
+    font-size: 12px;
+    color: var(--muted);
+    margin: 8px 0 14px;
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+  }
+  .metrics-hint {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .error-text {
+    padding: 10px 14px;
+    font-size: 13px;
+    color: var(--fg);
+  }
+  .status-line {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>PNRC OCR</h1>
+  <span class="status-line" id="connStatus"></span>
+</header>
+
+<main>
+  <div class="row">
+    <div class="field">
+      <label for="apiUrl">API Base URL</label>
+      <input type="text" id="apiUrl" value="https://jatin-veritos--pnrc-main-ocr-fastapi-app.modal.run" />
+    </div>
+    <div class="field">
+      <label for="apiKey">API Key</label>
+      <input type="text" id="apiKey" placeholder="X-API-Key" />
+    </div>
+  </div>
+
+  <div class="dropzone" id="dropzone">
+    <p><strong>Click to choose PDFs</strong> or drag & drop</p>
+    <p class="hint">Multiple files supported</p>
+    <input type="file" id="fileInput" accept="application/pdf" multiple />
+  </div>
+
+  <ul class="filelist" id="fileList" style="display:none;"></ul>
+
+  <div class="actions">
+    <button class="primary" id="processBtn" disabled>Process</button>
+    <button class="secondary" id="clearBtn">Clear</button>
+  </div>
+
+  <div id="results"></div>
+</main>
+
+<script>
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const fileListEl = document.getElementById('fileList');
+const processBtn = document.getElementById('processBtn');
+const clearBtn = document.getElementById('clearBtn');
+const resultsEl = document.getElementById('results');
+const apiUrlInput = document.getElementById('apiUrl');
+const apiKeyInput = document.getElementById('apiKey');
+const connStatus = document.getElementById('connStatus');
+
+const savedUrl = localStorage.getItem('pnrc_api_url');
+if (savedUrl) apiUrlInput.value = savedUrl;
+apiUrlInput.addEventListener('change', () => localStorage.setItem('pnrc_api_url', apiUrlInput.value.trim()));
+
+const savedKey = localStorage.getItem('pnrc_api_key');
+if (savedKey) apiKeyInput.value = savedKey;
+apiKeyInput.addEventListener('change', () => localStorage.setItem('pnrc_api_key', apiKeyInput.value.trim()));
+
+function apiHeaders() {
+  return { 'X-API-Key': apiKeyInput.value.trim() };
+}
+
+let selectedFiles = [];
+const jobResults = {};
+const jobFiles = {};
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropzone.classList.remove('drag');
+  addFiles(Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf'));
+});
+fileInput.addEventListener('change', () => {
+  addFiles(Array.from(fileInput.files));
+  fileInput.value = '';
+});
+
+function addFiles(files) {
+  for (const f of files) {
+    if (!selectedFiles.some(sf => sf.name === f.name && sf.size === f.size)) {
+      selectedFiles.push(f);
+    }
+  }
+  renderFileList();
+}
+
+function removeFile(idx) {
+  selectedFiles.splice(idx, 1);
+  renderFileList();
+}
+
+function renderFileList() {
+  fileListEl.innerHTML = '';
+  fileListEl.style.display = selectedFiles.length ? 'block' : 'none';
+  selectedFiles.forEach((f, idx) => {
+    const li = document.createElement('li');
+    const sizeKb = (f.size / 1024).toFixed(1);
+    li.innerHTML = `<span>${escapeHtml(f.name)} <span style="color:var(--muted)">(${sizeKb} KB)</span></span>`;
+    const btn = document.createElement('button');
+    btn.textContent = 'remove';
+    btn.onclick = () => removeFile(idx);
+    li.appendChild(btn);
+    fileListEl.appendChild(li);
+  });
+  processBtn.disabled = selectedFiles.length === 0;
+}
+
+clearBtn.addEventListener('click', () => {
+  selectedFiles = [];
+  renderFileList();
+  resultsEl.innerHTML = '';
+});
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function apiUrl() {
+  return apiUrlInput.value.trim().replace(/\/+$/, '');
+}
+
+// Must match MAX_FILES_PER_BATCH in src/config.py — the server rejects a request larger than this.
+const MAX_BATCH_SIZE = 8;
+
+function chunkFiles(files) {
+  const chunks = [];
+  for (let i = 0; i < files.length; i += MAX_BATCH_SIZE) {
+    chunks.push(files.slice(i, i + MAX_BATCH_SIZE));
+  }
+  return chunks;
+}
+
+function buildFormData(files) {
+  const fd = new FormData();
+  files.forEach(f => fd.append('files', f, f.name));
+  return fd;
+}
+
+processBtn.addEventListener('click', async () => {
+  processBtn.disabled = true;
+  const chunks = chunkFiles(selectedFiles);
+  let totalQueued = 0;
+  try {
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      connStatus.textContent = chunks.length > 1
+        ? `Submitting batch ${i + 1}/${chunks.length}...`
+        : 'Submitting...';
+      const res = await fetch(`${apiUrl()}/process/batch`, { method: 'POST', headers: apiHeaders(), body: buildFormData(chunk) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()} (batch ${i + 1}/${chunks.length})`);
+      const data = await res.json();
+      totalQueued += data.metrics?.files_queued ?? 0;
+      const fileByName = {};
+      chunk.forEach(f => { fileByName[f.name] = f; });
+      (data.jobs || []).forEach(job => {
+        if (job.call_id && fileByName[job.pdf_name]) jobFiles[job.call_id] = fileByName[job.pdf_name];
+        renderJobCard(job);
+      });
+      (data.jobs || []).forEach(job => pollJob(job));
+    }
+    connStatus.textContent = `Queued ${totalQueued} job(s)` + (chunks.length > 1 ? ` across ${chunks.length} batches` : '');
+  } catch (err) {
+    connStatus.textContent = 'Error: ' + err.message;
+  } finally {
+    processBtn.disabled = selectedFiles.length === 0;
+  }
+});
+
+const STAGES = [
+  { key: 'queued', label: 'Queued' },
+  { key: 'classifying', label: 'Classifying' },
+  { key: 'ocr', label: 'OCR' },
+  { key: 'done', label: 'Done' },
+];
+
+function renderJobCard(job) {
+  const card = document.createElement('div');
+  card.className = 'job';
+  card.id = `job-${job.call_id}`;
+  const stepsHtml = STAGES.map(s => `<div class="step" id="step-${job.call_id}-${s.key}">${s.label}</div>`).join('');
+  card.innerHTML = `
+    <div class="job-head">
+      <span class="job-name">${escapeHtml(job.pdf_name)}</span>
+      <div class="job-controls">
+        <button class="view-btn" id="view-${job.call_id}">View</button>
+        <span class="badge ${job.status}" id="badge-${job.call_id}">${job.status}</span>
+      </div>
+    </div>
+    <div class="stepper">${stepsHtml}</div>
+    <div class="bar-track"><div class="bar-fill" id="barfill-${job.call_id}"></div></div>
+    <div class="job-body" id="body-${job.call_id}"></div>
+  `;
+  card.querySelector('.job-head').addEventListener('click', (e) => {
+    if (e.target.closest('.view-btn')) return;
+    card.querySelector('.job-body').classList.toggle('open');
+  });
+  card.querySelector(`#view-${CSS.escape(job.call_id)}`).addEventListener('click', () => {
+    openJobJsonView(job.pdf_name, jobResults[job.call_id], jobFiles[job.call_id]);
+  });
+  resultsEl.prepend(card);
+}
+
+function setStage(callId, stage, detail) {
+  STAGES.forEach((s, i) => {
+    const el = document.getElementById(`step-${callId}-${s.key}`);
+    if (!el) return;
+    const currentIdx = STAGES.findIndex(x => x.key === stage);
+    el.className = 'step';
+    if (stage === 'error') {
+      if (s.key === (detail && detail.failedAt)) el.classList.add('error');
+      else if (i < STAGES.findIndex(x => x.key === (detail && detail.failedAt))) el.classList.add('done');
+    } else if (i < currentIdx) {
+      el.classList.add('done');
+    } else if (i === currentIdx) {
+      el.classList.add('active');
+      if (s.key === 'ocr' && detail && detail.pages_total) {
+        el.textContent = `OCR ${detail.pages_done ?? 0}/${detail.pages_total}`;
+      } else {
+        el.textContent = s.label;
+      }
+    }
+    if (s.key !== 'ocr' || i !== currentIdx) el.textContent = s.label;
+  });
+
+  const barfill = document.getElementById(`barfill-${callId}`);
+  if (barfill) {
+    if (stage === 'ocr' && detail && detail.pages_total) {
+      barfill.style.width = `${Math.round((detail.pages_done / detail.pages_total) * 100)}%`;
+    } else if (stage === 'done') {
+      barfill.style.width = '100%';
+    } else {
+      barfill.style.width = '0%';
+    }
+  }
+}
+
+const PROGRESS_POLL_MS = 1200;
+
+async function pollJob(job) {
+  if (!job.call_id || !job.job_id) return;
+  const badge = document.getElementById(`badge-${job.call_id}`);
+  const body = document.getElementById(`body-${job.call_id}`);
+  setStage(job.call_id, 'queued');
+
+  while (true) {
+    let progress;
+    try {
+      const res = await fetch(`${apiUrl()}/process/progress/${job.job_id}`, { headers: apiHeaders() });
+      progress = res.status === 404 ? { stage: 'queued' } : await res.json();
+    } catch (err) {
+      badge.textContent = 'error';
+      badge.className = 'badge error';
+      body.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+      body.classList.add('open');
+      return;
+    }
+
+    if (progress.stage === 'error') {
+      badge.textContent = 'error';
+      badge.className = 'badge error';
+      setStage(job.call_id, 'error', { failedAt: progress.failed_stage || 'classifying' });
+      body.innerHTML = `<div class="error-text">${escapeHtml(progress.error || 'Unknown error')}</div>`;
+      body.classList.add('open');
+      return;
+    }
+
+    badge.textContent = progress.stage;
+    badge.className = `badge ${progress.stage === 'done' ? 'completed' : 'running'}`;
+    setStage(job.call_id, progress.stage, progress);
+
+    if (progress.stage === 'done') break;
+    await new Promise(r => setTimeout(r, PROGRESS_POLL_MS));
+  }
+
+  try {
+    let data;
+    for (let attempt = 0; ; attempt++) {
+      const res = await fetch(`${apiUrl()}/process/result/${job.call_id}`, { headers: apiHeaders() });
+      if (res.status === 202) {
+        if (attempt >= 30) throw new Error('Timed out waiting for result after processing finished.');
+        await new Promise(r => setTimeout(r, PROGRESS_POLL_MS));
+        continue;
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      data = await res.json();
+      break;
+    }
+    badge.textContent = data.status;
+    badge.className = `badge ${data.status}`;
+    jobResults[job.call_id] = data;
+    document.getElementById(`view-${job.call_id}`)?.classList.add('show');
+    renderJobResult(body, data);
+  } catch (err) {
+    badge.textContent = 'error';
+    badge.className = 'badge error';
+    body.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+    body.classList.add('open');
+  }
+}
+
+function renderJobResult(body, data) {
+  const metrics = data.metrics || {};
+  body.innerHTML = `
+    <div class="metrics">
+      Sheets: ${metrics.sheet_count ?? '-'} &middot;
+      Filled: ${metrics.filled_sheet_count ?? '-'} &middot;
+      Processing: ${metrics.processing_seconds ?? '-'}s &middot;
+      Cold start: ${metrics.cold_start_seconds ?? '-'}s &middot;
+      Approx cost: $${metrics.approx_cost_usd ?? '-'}
+    </div>
+    <div class="metrics-hint">Click <strong>View</strong> to see per-page content.</div>
+  `;
+  body.classList.add('open');
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function openJobJsonView(pdfName, data, file) {
+  if (!data) return;
+  const w = window.open('', '_blank');
+  if (!w) return;
+  w.document.write('<title>Loading…</title><body style="font-family:sans-serif;padding:24px;">Loading preview…</body>');
+  w.document.close();
+
+  const pages = data.pages || [];
+  const pdfDataUrl = file ? await fileToDataUrl(file) : null;
+
+  const sectionsHtml = pages.map(p => {
+    const isEmpty = p.status === 'empty' || !p.text;
+    const conf = p.confidence || {};
+    const pdfCol = pdfDataUrl
+      ? `<canvas id="pdfcanvas-${p.page}" class="pdf-canvas"></canvas>`
+      : `<div class="pdf-missing">PDF preview unavailable</div>`;
+    const tagsHtml = `
+      <span class="tag ${isEmpty ? '' : 'on'}">${p.status}</span>
+      ${p.need_review ? '<span class="tag on">needs review</span>' : ''}
+      ${conf.is_low_confidence ? '<span class="tag on">low confidence</span>' : ''}
+    `;
+    const textHtml = isEmpty
+      ? `<div class="empty-text">No text extracted (empty page)</div>`
+      : `<div class="ocr-text" id="ocrtext-${p.page}">${escapeHtml(p.text)}</div>`;
+    return `
+      <section>
+        <h2>Page ${p.page}${isEmpty ? ' &mdash; EMPTY' : ''}</h2>
+        <div class="split">
+          <div class="col pdfcol">${pdfCol}</div>
+          <div class="col jsoncol">
+            <div class="tags">${tagsHtml}</div>
+            ${textHtml}
+            <details class="raw">
+              <summary>Raw JSON</summary>
+              <pre>${escapeHtml(JSON.stringify(p, null, 2))}</pre>
+            </details>
+          </div>
+        </div>
+      </section>
+    `;
+  }).join('');
+
+  const pageNums = pages.map(p => p.page);
+  const pageTexts = pages.filter(p => p.text).map(p => ({ page: p.page, text: p.text }));
+
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>${escapeHtml(pdfName)} &mdash; JSON</title>
+<style>
+  body { background:#fff; color:#000; font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif; margin:0; padding:24px; }
+  h1 { font-size:16px; text-transform:uppercase; letter-spacing:0.5px; border-bottom:2px solid #000; padding-bottom:12px; margin:0 0 20px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:0.5px; margin:0; padding:8px 12px; background:#f0f0f0; border-bottom:1px solid #000; }
+  section { border:1px solid #000; margin-bottom:14px; }
+  .split { display:flex; }
+  .col { flex:1 1 50%; min-width:0; }
+  .pdfcol { border-right:1px solid #000; padding:12px; overflow:auto; background:#fafafa; display:flex; align-items:flex-start; justify-content:center; }
+  .pdf-canvas { max-width:100%; height:auto; display:block; }
+  .pdf-missing { color:#666; font-size:12px; padding:20px; font-style:italic; }
+  pre { margin:0; padding:12px; white-space:pre-wrap; word-break:break-word; font-size:12px; font-family:"SF Mono",Consolas,monospace; }
+  .jsoncol { padding:14px; }
+  .tags { margin-bottom:12px; }
+  .tag { display:inline-block; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; border:1px solid #000; padding:2px 8px; margin:0 6px 6px 0; color:#666; border-color:#666; }
+  .tag.on { background:#000; color:#fff; border-color:#000; }
+  .ocr-text { white-space:pre-wrap; word-break:break-word; font-size:14px; line-height:1.6; }
+  .ocr-text h1, .ocr-text h2, .ocr-text h3, .ocr-text h4 { font-size:14px; font-weight:700; margin:12px 0 4px; }
+  .ocr-text p { margin:0 0 8px; }
+  .ocr-text ul, .ocr-text ol { margin:0 0 8px 20px; padding:0; }
+  .ocr-text li { margin:2px 0; }
+  .ocr-text code { background:#f0f0f0; padding:1px 4px; font-family:"SF Mono",Consolas,monospace; font-size:13px; }
+  .ocr-text strong { font-weight:700; }
+  .empty-text { color:#666; font-size:13px; font-style:italic; }
+  .raw { margin-top:16px; border-top:1px solid #ddd; padding-top:8px; }
+  .raw summary { cursor:pointer; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:#666; }
+  .raw pre { padding:10px 0 0; }
+  @media (max-width: 800px) { .split { flex-direction:column; } .pdfcol { border-right:none; border-bottom:1px solid #000; } }
+</style></head>
+<body>
+  <h1>${escapeHtml(pdfName)}</h1>
+  ${sectionsHtml || '<p>No pages.</p>'}
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"><\/script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"><\/script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.5/purify.min.js"><\/script>
+  <script>
+    const PDF_DATA_URL = ${pdfDataUrl ? JSON.stringify(pdfDataUrl) : 'null'};
+    const PAGE_NUMS = ${JSON.stringify(pageNums)};
+    const PAGE_TEXTS = ${JSON.stringify(pageTexts)};
+
+    function normalizeMarkdown(raw) {
+      let text = raw.trim();
+      const fenced = text.match(/^\`\`\`(?:markdown)?\\s*\\n([\\s\\S]*?)\\n?\`\`\`$/);
+      if (fenced) text = fenced[1];
+      return text.replace(/^[ \\t]*[•·][ \\t]+/gm, '- ');
+    }
+
+    function renderMarkdownText() {
+      if (typeof marked === 'undefined' || typeof DOMPurify === 'undefined') return;
+      for (const { page, text } of PAGE_TEXTS) {
+        const el = document.getElementById('ocrtext-' + page);
+        if (!el) continue;
+        try {
+          const md = normalizeMarkdown(text);
+          el.innerHTML = DOMPurify.sanitize(marked.parse(md));
+        } catch (e) {
+          // leave the plain-text fallback already in the DOM
+        }
+      }
+    }
+    renderMarkdownText();
+    async function renderPages() {
+      if (!PDF_DATA_URL || typeof pdfjsLib === 'undefined') return;
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      try {
+        const pdf = await pdfjsLib.getDocument(PDF_DATA_URL).promise;
+        for (const num of PAGE_NUMS) {
+          const canvas = document.getElementById('pdfcanvas-' + num);
+          if (!canvas) continue;
+          try {
+            const page = await pdf.getPage(num);
+            const viewport = page.getViewport({ scale: 1.3 });
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            const ctx = canvas.getContext('2d');
+            await page.render({ canvasContext: ctx, viewport }).promise;
+          } catch (e) {
+            canvas.replaceWith(Object.assign(document.createElement('div'), {
+              className: 'pdf-missing', textContent: 'Failed to render page ' + num,
+            }));
+          }
+        }
+      } catch (e) {
+        document.querySelectorAll('.pdf-canvas').forEach(c => c.replaceWith(Object.assign(document.createElement('div'), {
+          className: 'pdf-missing', textContent: 'Failed to load PDF',
+        })));
+      }
+    }
+    renderPages();
+  <\/script>
+</body></html>`;
+
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+}
+</script>
+
+</body>
+</html>

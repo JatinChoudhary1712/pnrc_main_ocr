@@ -1,8 +1,12 @@
+import uuid
+
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 import modal
 
 from src.config import MAX_FILES_PER_BATCH
+
+progress_dict = modal.Dict.from_name("pnrc-ocr-progress", create_if_missing=True)
 
 
 async def _read_pdf(file: UploadFile) -> tuple[str, bytes]:
@@ -20,7 +24,8 @@ def build_process_router(worker_cls):
     async def process_document(file: UploadFile = File(...)):
         pdf_name, pdf_bytes = await _read_pdf(file)
         worker = worker_cls()
-        result = await worker.process_document.remote.aio(pdf_bytes, pdf_name)
+        job_id = str(uuid.uuid4())
+        result = await worker.process_document.remote.aio(pdf_bytes, pdf_name, job_id)
         return {"pdf_name": pdf_name, **result}
 
     @router.post("/process/batch")
@@ -42,8 +47,11 @@ def build_process_router(worker_cls):
         for file in files:
             try:
                 pdf_name, pdf_bytes = await _read_pdf(file)
-                call = await worker.process_document.spawn.aio(pdf_bytes, pdf_name)
-                jobs.append({"pdf_name": pdf_name, "call_id": call.object_id, "status": "queued"})
+                job_id = str(uuid.uuid4())
+                call = await worker.process_document.spawn.aio(pdf_bytes, pdf_name, job_id)
+                jobs.append(
+                    {"pdf_name": pdf_name, "call_id": call.object_id, "job_id": job_id, "status": "queued"}
+                )
             except HTTPException as exc:
                 jobs.append({"pdf_name": file.filename or "uploaded.pdf", "status": "error", "error": exc.detail})
 
@@ -60,6 +68,13 @@ def build_process_router(worker_cls):
                 },
             },
         )
+
+    @router.get("/process/progress/{job_id}")
+    async def process_progress(job_id: str):
+        data = await progress_dict.get.aio(job_id, None)
+        if data is None:
+            return JSONResponse(status_code=404, content={"job_id": job_id, "stage": "unknown"})
+        return {"job_id": job_id, **data}
 
     @router.get("/process/result/{call_id}")
     async def process_result(call_id: str):

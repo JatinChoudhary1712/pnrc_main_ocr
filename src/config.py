@@ -42,14 +42,6 @@ def get_device():
     torch.set_num_interop_threads(CPU_CORES)
     return "cuda" if torch.cuda.is_available() else "cpu"
 
-## Local API server (proxy layer)
-API_HOST = os.environ.get("API_HOST", "127.0.0.1")
-API_PORT = int(os.environ.get("API_PORT", "8000"))
-
-## API auth
-API_KEY_HEADER = "X-API-Key"
-API_KEY = os.environ.get("API_KEY")
-
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 ## Classification
@@ -63,3 +55,12 @@ LOW_CONFIDENCE_RUN_LENGTH = 3
 
 ## Image rendering
 PDF_DPI = 150
+
+## Batching
+MAX_FILES_PER_BATCH = int(os.environ.get("MAX_FILES_PER_BATCH", "8"))
+
+## Container lifecycle
+SCALEDOWN_WINDOW = int(os.environ.get("SCALEDOWN_WINDOW", "15"))
+
+## Cost estimation
+L4_HOURLY_RATE = 0.80

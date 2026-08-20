@@ -67,9 +67,10 @@ def get_ocr_device():
     return "not loaded"
 
 
-def ocr_image_payloads(pages_payload):
+def ocr_image_payloads(pages_payload, on_progress=None):
     """OCR filled page PNG bytes. Runs on the Modal GPU worker."""
 
+    total = len(pages_payload)
     results = []
     pbar = tqdm(pages_payload, desc=f"OCR - Model name : {OCR_MODEL_NAME}")
     for i, item in enumerate(pbar):
@@ -97,6 +98,9 @@ def ocr_image_payloads(pages_payload):
         if "pdf_name" in item:
             result["pdf_name"] = item["pdf_name"]
         results.append(result)
+
+        if on_progress:
+            on_progress(i + 1, total)
 
         if i == 0:
             device = get_ocr_device()

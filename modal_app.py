@@ -1,9 +1,11 @@
 import time
 import modal
 
+from src.config import SCALEDOWN_WINDOW
+
 app = modal.App("pnrc-main-ocr")
 
-MAX_FILES_PER_BATCH = 8
+progress_dict = modal.Dict.from_name("pnrc-ocr-progress", create_if_missing=True)
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
@@ -17,6 +19,11 @@ image = (
     .run_commands(
         "nohup ollama serve > /tmp/ollama.log 2>&1 & "
         "sleep 5 && ollama pull glm-ocr"
+    )
+    .run_commands(
+        "python -c \"from transformers import AutoImageProcessor, AutoModel; "
+        "AutoImageProcessor.from_pretrained('facebook/dinov2-base'); "
+        "AutoModel.from_pretrained('facebook/dinov2-base')\""
     )
     .add_local_dir("src", remote_path="/root/app/src")
     .add_local_dir("knowledge_base", remote_path="/root/app/knowledge_base")
@@ -78,7 +85,7 @@ def _merge_pages(page_results, ocr_filled):
     image=image,
     gpu="L4",
     timeout=3600,
-    scaledown_window=80,
+    scaledown_window=SCALEDOWN_WINDOW,
 )
 class Worker:
     @modal.enter()
@@ -93,46 +100,78 @@ class Worker:
         self.request_count = 0
 
     @modal.method()
-    def process_document(self, pdf_bytes: bytes, pdf_name: str):
+    def process_document(self, pdf_bytes: bytes, pdf_name: str, job_id: str):
+        from src.config import L4_HOURLY_RATE
         from src.services.ocr_service import ocr_image_payloads
 
-        is_first_request = self.request_count == 0
-        self.request_count += 1
+        current_stage = "classifying"
 
-        start_time = time.time()
+        def set_progress(stage, **detail):
+            nonlocal current_stage
+            current_stage = stage
+            progress_dict[job_id] = {"stage": stage, "pdf_name": pdf_name, **detail}
 
-        page_results, page_images = self.classify_pdf(pdf_bytes)
+        try:
+            is_first_request = self.request_count == 0
+            self.request_count += 1
 
-        filled_pages = [r["page"] for r in page_results if r["prediction"] == "filled"]
-        pages_payload = [
-            {"page": p, "image_png": page_images[p].tobytes("png"), "pdf_name": pdf_name}
-            for p in filled_pages
-        ]
+            start_time = time.time()
 
-        ocr_results = ocr_image_payloads(pages_payload)
-        pages = _merge_pages(page_results, ocr_results)
+            set_progress("classifying")
+            page_results, page_images = self.classify_pdf(pdf_bytes)
 
-        processing_seconds = time.time() - start_time
-        cold_start_seconds = (self.ollama_ready_ts - self.container_start_ts) if is_first_request else 0
+            filled_pages = [r["page"] for r in page_results if r["prediction"] == "filled"]
+            pages_payload = [
+                {"page": p, "image_png": page_images[p].tobytes("png"), "pdf_name": pdf_name}
+                for p in filled_pages
+            ]
 
-        return {
-            "pages": pages,
-            "metrics": {
-                "sheet_count": len(page_results),
-                "filled_sheet_count": len(filled_pages),
-                "processing_seconds": round(processing_seconds, 2),
-                "is_first_request": is_first_request,
-                "cold_start_seconds": round(cold_start_seconds, 2),
-                "approx_cost_usd": round(((processing_seconds + cold_start_seconds) / 3600) * 0.80, 4),
-            },
-        }
+            set_progress("ocr", pages_done=0, pages_total=len(pages_payload))
+            ocr_results = ocr_image_payloads(
+                pages_payload,
+                on_progress=lambda done, total: set_progress("ocr", pages_done=done, pages_total=total),
+            )
+            pages = _merge_pages(page_results, ocr_results)
+
+            processing_seconds = time.time() - start_time
+            cold_start_seconds = (self.ollama_ready_ts - self.container_start_ts) if is_first_request else 0
+
+            result = {
+                "pages": pages,
+                "metrics": {
+                    "sheet_count": len(page_results),
+                    "filled_sheet_count": len(filled_pages),
+                    "processing_seconds": round(processing_seconds, 2),
+                    "is_first_request": is_first_request,
+                    "cold_start_seconds": round(cold_start_seconds, 2),
+                    "approx_cost_usd": round(((processing_seconds + cold_start_seconds) / 3600) * L4_HOURLY_RATE, 4),
+                },
+            }
+            set_progress("done")
+            return result
+        except Exception as exc:
+            progress_dict[job_id] = {
+                "stage": "error",
+                "pdf_name": pdf_name,
+                "error": str(exc),
+                "failed_stage": current_stage,
+            }
+            raise
 
 
-web_image = modal.Image.debian_slim(python_version="3.12").pip_install("fastapi", "python-multipart", "pydantic")
+web_image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .pip_install("fastapi", "python-multipart", "pydantic", "python-dotenv")
+    .add_local_dir("src", remote_path="/root/app/src")
+)
 
-@app.function(image=web_image)
+@app.function(image=web_image, secrets=[modal.Secret.from_name("pnrc-api-key")])
 @modal.asgi_app()
 def fastapi_app():
-    from src.main import app as web_app
+    import sys
 
-    return web_app
+    sys.path.insert(0, "/root/app")
+
+    from src.main import create_app
+
+    return create_app(Worker)
