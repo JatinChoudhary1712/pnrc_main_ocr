@@ -1,7 +1,11 @@
+import os
 import time
 import modal
 
-from src.config import SCALEDOWN_WINDOW
+# Read directly rather than importing src.config: this module is re-imported
+# inside the container before src/ is added to sys.path (see _start_ollama),
+# so a top-level `from src...` import here would crash-loop every container.
+SCALEDOWN_WINDOW = int(os.environ.get("SCALEDOWN_WINDOW", "15"))
 
 app = modal.App("pnrc-main-ocr")
 

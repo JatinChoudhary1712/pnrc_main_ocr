@@ -205,6 +205,7 @@
     font-size: 13px;
     color: var(--fg);
   }
+  .mono { font-family: "SF Mono", Consolas, monospace; }
   .status-line {
     font-size: 12px;
     color: var(--muted);
@@ -216,7 +217,7 @@
 
 <header>
   <h1>PNRC OCR</h1>
-  <span class="status-line" id="connStatus"></span>
+  <span class="status-line"><span class="mono" id="timer"></span> <span id="connStatus"></span></span>
 </header>
 
 <main>
@@ -257,6 +258,22 @@ const resultsEl = document.getElementById('results');
 const apiUrlInput = document.getElementById('apiUrl');
 const apiKeyInput = document.getElementById('apiKey');
 const connStatus = document.getElementById('connStatus');
+const timerEl = document.getElementById('timer');
+
+let timerInterval = null;
+function startTimer() {
+  clearInterval(timerInterval);
+  const startedAt = Date.now();
+  const tick = () => {
+    const s = Math.floor((Date.now() - startedAt) / 1000);
+    timerEl.textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  };
+  tick();
+  timerInterval = setInterval(tick, 1000);
+}
+function stopTimer() {
+  clearInterval(timerInterval);
+}
 
 const savedUrl = localStorage.getItem('pnrc_api_url');
 if (savedUrl) apiUrlInput.value = savedUrl;
@@ -349,9 +366,36 @@ function buildFormData(files) {
   return fd;
 }
 
+const RETRY_DELAY_MS = 600;
+const FRIENDLY_ERROR = 'Unable to process this PDF. Please verify the PDF and try again.';
+
+async function withRetryOnce(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+    try {
+      return await fn();
+    } catch {
+      throw new Error(FRIENDLY_ERROR);
+    }
+  }
+}
+
+async function parseJsonResponse(res) {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Non-JSON response (${res.status}): ${text.slice(0, 200)}`);
+  }
+}
+
 processBtn.addEventListener('click', async () => {
   processBtn.disabled = true;
+  startTimer();
   const chunks = chunkFiles(selectedFiles);
+  const jobPromises = [];
   let totalQueued = 0;
   try {
     for (let i = 0; i < chunks.length; i++) {
@@ -359,9 +403,11 @@ processBtn.addEventListener('click', async () => {
       connStatus.textContent = chunks.length > 1
         ? `Submitting batch ${i + 1}/${chunks.length}...`
         : 'Submitting...';
-      const res = await fetch(`${apiUrl()}/process/batch`, { method: 'POST', headers: apiHeaders(), body: buildFormData(chunk) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()} (batch ${i + 1}/${chunks.length})`);
-      const data = await res.json();
+      const data = await withRetryOnce(async () => {
+        const res = await fetch(`${apiUrl()}/process/batch`, { method: 'POST', headers: apiHeaders(), body: buildFormData(chunk) });
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()} (batch ${i + 1}/${chunks.length})`);
+        return parseJsonResponse(res);
+      });
       totalQueued += data.metrics?.files_queued ?? 0;
       const fileByName = {};
       chunk.forEach(f => { fileByName[f.name] = f; });
@@ -369,11 +415,13 @@ processBtn.addEventListener('click', async () => {
         if (job.call_id && fileByName[job.pdf_name]) jobFiles[job.call_id] = fileByName[job.pdf_name];
         renderJobCard(job);
       });
-      (data.jobs || []).forEach(job => pollJob(job));
+      (data.jobs || []).forEach(job => jobPromises.push(pollJob(job)));
     }
     connStatus.textContent = `Queued ${totalQueued} job(s)` + (chunks.length > 1 ? ` across ${chunks.length} batches` : '');
+    Promise.all(jobPromises).then(stopTimer);
   } catch (err) {
     connStatus.textContent = 'Error: ' + err.message;
+    stopTimer();
   } finally {
     processBtn.disabled = selectedFiles.length === 0;
   }
@@ -458,8 +506,10 @@ async function pollJob(job) {
   while (true) {
     let progress;
     try {
-      const res = await fetch(`${apiUrl()}/process/progress/${job.job_id}`, { headers: apiHeaders() });
-      progress = res.status === 404 ? { stage: 'queued' } : await res.json();
+      progress = await withRetryOnce(async () => {
+        const res = await fetch(`${apiUrl()}/process/progress/${job.job_id}`, { headers: apiHeaders() });
+        return res.status === 404 ? { stage: 'queued' } : parseJsonResponse(res);
+      });
     } catch (err) {
       badge.textContent = 'error';
       badge.className = 'badge error';
@@ -488,14 +538,18 @@ async function pollJob(job) {
   try {
     let data;
     for (let attempt = 0; ; attempt++) {
-      const res = await fetch(`${apiUrl()}/process/result/${job.call_id}`, { headers: apiHeaders() });
-      if (res.status === 202) {
+      const result = await withRetryOnce(async () => {
+        const res = await fetch(`${apiUrl()}/process/result/${job.call_id}`, { headers: apiHeaders() });
+        if (res.status === 202) return { __pending: true };
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+        return parseJsonResponse(res);
+      });
+      if (result.__pending) {
         if (attempt >= 30) throw new Error('Timed out waiting for result after processing finished.');
         await new Promise(r => setTimeout(r, PROGRESS_POLL_MS));
         continue;
       }
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-      data = await res.json();
+      data = result;
       break;
     }
     badge.textContent = data.status;
