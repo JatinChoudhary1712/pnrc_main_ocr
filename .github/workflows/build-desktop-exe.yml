@@ -1,0 +1,31 @@
+name: Build desktop exe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "desktop/**"
+      - ".github/workflows/build-desktop-exe.yml"
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - run: pyinstaller --onefile --windowed --name "PNRC-OCR" --add-data "ui.html;." app.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PNRC-OCR
+          path: desktop/dist/PNRC-OCR.exe

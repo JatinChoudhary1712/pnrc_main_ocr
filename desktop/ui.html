@@ -1,0 +1,275 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PNRC OCR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #ffffff;
+    --panel: #ffffff;
+    --panel-border: #1a1a1a;
+    --ink: #000000;
+    --ink-dim: #555555;
+    --ink-faint: #8a8a8a;
+    --accent: #000000;
+    --accent-ink: #ffffff;
+    --accent-soft: #f0f0f0;
+    --track: #e6e6e6;
+    --good: #1a7a3c;
+    --good-soft: #e6f4ea;
+    --bad: #c22b2b;
+    --bad-soft: #fbe8e8;
+    --shadow: 0 1px 2px rgba(0,0,0,0.05), 0 8px 24px rgba(0,0,0,0.08);
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    margin: 0;
+    padding: 28px 20px 60px;
+  }
+  .window {
+    max-width: 640px;
+    margin: 0 auto;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .window-head { padding: 20px 26px; border-bottom: 1px solid var(--panel-border); }
+  .window-head h1 { margin: 0 0 4px; font-size: 1.15rem; font-weight: 600; }
+  .window-head p { margin: 0; color: var(--ink-dim); font-size: 0.86rem; }
+  .section { padding: 20px 26px; border-bottom: 1px solid var(--panel-border); }
+  .section:last-child { border-bottom: none; }
+  label.field-label {
+    display: block; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 8px;
+  }
+  input[type="password"] {
+    width: 100%; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.88rem;
+    padding: 10px 12px; border-radius: 8px; border: 1px solid var(--panel-border);
+    background: var(--bg); color: var(--ink);
+  }
+  .folder-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .folder-btn {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+    padding: 14px 14px; border-radius: 10px; border: 1px dashed var(--panel-border);
+    background: var(--bg); cursor: pointer; font-family: inherit; color: var(--ink);
+    text-align: left; transition: border-color 120ms ease, background 120ms ease;
+  }
+  .folder-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
+  .folder-btn .label { font-size: 0.82rem; font-weight: 600; }
+  .folder-btn .value {
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.76rem;
+    color: var(--ink-dim); overflow-wrap: anywhere;
+  }
+  .folder-btn .value.unset { color: var(--ink-faint); }
+  .validation {
+    margin-top: 10px; font-size: 0.8rem; padding: 9px 12px; border-radius: 8px;
+    display: none; font-family: "IBM Plex Mono", ui-monospace, monospace;
+  }
+  .validation.show { display: block; }
+  .validation.bad { background: var(--bad-soft); color: var(--bad); }
+  .validation.good { background: var(--good-soft); color: var(--good); }
+  .btn-row { display: flex; gap: 10px; margin-top: 16px; }
+  .start-btn, .cancel-btn {
+    padding: 12px; border-radius: 9px; border: none; font-family: inherit;
+    font-weight: 600; font-size: 0.92rem; cursor: pointer; transition: opacity 120ms ease;
+  }
+  .start-btn { flex: 1; background: var(--accent); color: var(--accent-ink); }
+  .start-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .start-btn:not(:disabled):hover { opacity: 0.92; }
+  .cancel-btn {
+    display: none; background: var(--panel); color: var(--ink); border: 1px solid var(--panel-border);
+  }
+  .cancel-btn.show { display: block; }
+  .progress-wrap { display: none; }
+  .progress-wrap.show { display: block; }
+  .progress-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+  .progress-count { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.82rem; color: var(--ink-dim); }
+  .progress-pct { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 1.1rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .bar-track { height: 8px; border-radius: 999px; background: var(--track); overflow: hidden; }
+  .bar-fill { height: 100%; width: 0%; background: var(--accent); border-radius: 999px; transition: width 220ms ease; }
+  .stat-row { display: flex; gap: 16px; margin-top: 12px; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.78rem; }
+  .stat-row .good-txt { color: var(--good); }
+  .stat-row .bad-txt { color: var(--bad); }
+  .stat-row .bad-txt::before { content: "✕ "; }
+  .stat-row .good-txt::before { content: "✓ "; }
+  .write-log {
+    margin-top: 14px; max-height: 220px; overflow-y: auto; border: 1px solid var(--panel-border);
+    border-radius: 8px; background: var(--bg); padding: 8px 10px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.74rem;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .write-log:empty::before { content: "Writes will stream in here as each file finishes."; color: var(--ink-faint); }
+  .write-log .entry { color: var(--ink-dim); }
+  .write-log .entry .ok-mark { color: var(--good); }
+  .write-log .entry .err-mark { color: var(--bad); }
+  .out-note { margin-top: 14px; font-size: 0.76rem; color: var(--ink-faint); line-height: 1.5; }
+  .out-note code { font-family: "IBM Plex Mono", ui-monospace, monospace; background: var(--track); padding: 1px 5px; border-radius: 4px; color: var(--ink-dim); }
+</style>
+</head>
+<body>
+
+<div class="window">
+  <div class="window-head">
+    <h1>Batch document processing</h1>
+    <p>Select a folder of PDFs, choose where results go, and start.</p>
+  </div>
+
+  <div class="section">
+    <label class="field-label" for="apiKey">X-API-Key</label>
+    <input type="password" id="apiKey" placeholder="Paste your API key">
+  </div>
+
+  <div class="section">
+    <label class="field-label">Folders</label>
+    <div class="folder-row">
+      <button class="folder-btn" id="pickInput" type="button" disabled>
+        <span class="label">📁 Input folder</span>
+        <span class="value unset" id="inputPath">Not selected</span>
+      </button>
+      <button class="folder-btn" id="pickOutput" type="button" disabled>
+        <span class="label">💾 Output folder</span>
+        <span class="value unset" id="outputPath">Not selected</span>
+      </button>
+    </div>
+    <div class="validation" id="validation"></div>
+    <div class="btn-row">
+      <button class="start-btn" id="startBtn" disabled>Start processing</button>
+      <button class="cancel-btn" id="cancelBtn" type="button">Cancel</button>
+    </div>
+  </div>
+
+  <div class="section progress-wrap" id="progressSection">
+    <div class="progress-head">
+      <span class="progress-count" id="progressCount">0 / 0 files</span>
+      <span class="progress-pct" id="progressPct">0%</span>
+    </div>
+    <div class="bar-track"><div class="bar-fill" id="barFill"></div></div>
+    <div class="stat-row">
+      <span class="good-txt" id="okCount">0 done</span>
+      <span class="bad-txt" id="errCount">0 errors</span>
+    </div>
+    <div class="write-log" id="writeLog"></div>
+  </div>
+</div>
+
+<script>
+  const pickInputBtn = document.getElementById('pickInput');
+  const pickOutputBtn = document.getElementById('pickOutput');
+  const inputPathEl = document.getElementById('inputPath');
+  const outputPathEl = document.getElementById('outputPath');
+  const validationEl = document.getElementById('validation');
+  const startBtn = document.getElementById('startBtn');
+  const cancelBtn = document.getElementById('cancelBtn');
+  const apiKeyInput = document.getElementById('apiKey');
+
+  const progressSection = document.getElementById('progressSection');
+  const progressCount = document.getElementById('progressCount');
+  const progressPct = document.getElementById('progressPct');
+  const barFill = document.getElementById('barFill');
+  const okCount = document.getElementById('okCount');
+  const errCount = document.getElementById('errCount');
+  const writeLog = document.getElementById('writeLog');
+
+  let inputFolder = null;
+  let outputFolder = null;
+
+  function updateStartEnabled() {
+    startBtn.disabled = !(inputFolder && outputFolder && apiKeyInput.value.trim());
+  }
+  apiKeyInput.addEventListener('input', updateStartEnabled);
+
+  window.addEventListener('pywebviewready', () => {
+    pickInputBtn.disabled = false;
+    pickOutputBtn.disabled = false;
+  });
+
+  pickInputBtn.addEventListener('click', async () => {
+    const res = await window.pywebview.api.pick_input_folder();
+    if (res.cancelled) return;
+    if (!res.ok) {
+      inputFolder = null;
+      inputPathEl.textContent = 'Not selected';
+      inputPathEl.classList.add('unset');
+      validationEl.textContent = `✕ ${res.error}`;
+      validationEl.className = 'validation show bad';
+      updateStartEnabled();
+      return;
+    }
+    inputFolder = res.folder;
+    inputPathEl.textContent = `${res.folder}  —  ${res.count} PDFs`;
+    inputPathEl.classList.remove('unset');
+    validationEl.textContent = `✓ All ${res.count} files are valid PDFs.`;
+    validationEl.className = 'validation show good';
+    updateStartEnabled();
+  });
+
+  pickOutputBtn.addEventListener('click', async () => {
+    const res = await window.pywebview.api.pick_output_folder();
+    if (res.cancelled || !res.ok) return;
+    outputFolder = res.folder;
+    outputPathEl.textContent = res.folder;
+    outputPathEl.classList.remove('unset');
+    updateStartEnabled();
+  });
+
+  startBtn.addEventListener('click', async () => {
+    startBtn.disabled = true;
+    cancelBtn.classList.add('show');
+    progressSection.classList.add('show');
+    writeLog.innerHTML = '';
+    okCount.textContent = '0 done';
+    errCount.textContent = '0 errors';
+    barFill.style.width = '0%';
+    progressCount.textContent = '0 / 0 files';
+    progressPct.textContent = '0%';
+
+    await window.pywebview.api.start_processing(inputFolder, outputFolder, apiKeyInput.value.trim());
+  });
+
+  cancelBtn.addEventListener('click', async () => {
+    cancelBtn.disabled = true;
+    await window.pywebview.api.cancel();
+  });
+
+  window.onDesktopEvent = (event, payload) => {
+    if (event === 'start') {
+      progressCount.textContent = `0 / ${payload.total} files`;
+      return;
+    }
+
+    if (event === 'file_done') {
+      const pct = Math.round((payload.done / payload.total) * 100);
+      progressCount.textContent = `${payload.done} / ${payload.total} files`;
+      progressPct.textContent = `${pct}%`;
+      barFill.style.width = `${pct}%`;
+      okCount.textContent = `${payload.ok} done`;
+      errCount.textContent = `${payload.err} errors`;
+
+      const line = document.createElement('div');
+      line.className = 'entry';
+      line.innerHTML = payload.status === 'error'
+        ? `<span class="err-mark">✕ written</span>  ${payload.output_path}  <span style="color:var(--ink-faint)">(status: error)</span>`
+        : `<span class="ok-mark">✓ written</span>  ${payload.output_path}`;
+      writeLog.appendChild(line);
+      writeLog.scrollTop = writeLog.scrollHeight;
+      return;
+    }
+
+    if (event === 'complete') {
+      cancelBtn.classList.remove('show');
+      cancelBtn.disabled = false;
+      startBtn.disabled = false;
+      startBtn.textContent = payload.cancelled ? 'Start processing (cancelled — resume by restarting)' : 'Start processing (run again)';
+    }
+  };
+</script>
+</body>
+</html>
