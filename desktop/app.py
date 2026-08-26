@@ -9,13 +9,50 @@ from pathlib import Path
 import httpx
 import webview
 
-API_BASE = "https://jatin-veritos--pnrc-main-ocr-fastapi-app.modal.run"
+
+def load_dotenv(path):
+    if not path.is_file():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip())
+
+
+exe_dir = Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve().parent
+load_dotenv(exe_dir / ".env")
+
+DEFAULT_API_BASE = os.environ.get("PNRC_API_BASE", "https://jatin-veritos--pnrc-main-ocr-fastapi-app.modal.run")
 MAX_IN_FLIGHT = 10  # Modal's hard container cap; keep <= that so we never over-submit
 POLL_INTERVAL = 1.2
 RESULT_MAX_ATTEMPTS = 60
 RETRY_DELAY = 0.6
 FRIENDLY_ERROR = "Unable to process this PDF. Please verify the PDF and try again."
 SYSTEM_FILES = {".ds_store", "thumbs.db", "desktop.ini"}
+
+ADMIN_USERNAME = "veritosadmin"
+ADMIN_PASSWORD = "adminveritos"
+USER_USERNAME = "userveritos"
+USER_PASSWORD = "userveritos"
+
+CONFIG_DIR = Path(os.environ.get("APPDATA") or Path.home() / ".config") / "PNRC-OCR"
+CONFIG_PATH = CONFIG_DIR / "config.json"
+
+
+def load_config():
+    if not CONFIG_PATH.is_file():
+        return {}
+    try:
+        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def save_config(data):
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def is_hidden(name: str) -> bool:
@@ -46,6 +83,42 @@ class Api:
     def __init__(self):
         self.window = None
         self.cancelled = False
+        config = load_config()
+        self.api_base = config.get("api_base") or DEFAULT_API_BASE
+        self.api_key = config.get("api_key", "")
+        self.gpu_type = config.get("gpu_type", "L4")
+        self.max_containers = config.get("max_containers", 6)
+        self.scaledown_window = config.get("scaledown_window", 15)
+
+    def login(self, username, password):
+        return {"ok": username == USER_USERNAME and password == USER_PASSWORD}
+
+    def admin_login(self, username, password):
+        return {"ok": username == ADMIN_USERNAME and password == ADMIN_PASSWORD}
+
+    def get_admin_settings(self):
+        return {
+            "api_base": self.api_base,
+            "api_key": self.api_key,
+            "gpu_type": self.gpu_type,
+            "max_containers": self.max_containers,
+            "scaledown_window": self.scaledown_window,
+        }
+
+    def save_admin_settings(self, settings):
+        self.api_base = settings.get("api_base") or self.api_base
+        self.api_key = settings.get("api_key", self.api_key)
+        self.gpu_type = settings.get("gpu_type", self.gpu_type)
+        self.max_containers = settings.get("max_containers", self.max_containers)
+        self.scaledown_window = settings.get("scaledown_window", self.scaledown_window)
+        save_config({
+            "api_base": self.api_base,
+            "api_key": self.api_key,
+            "gpu_type": self.gpu_type,
+            "max_containers": self.max_containers,
+            "scaledown_window": self.scaledown_window,
+        })
+        return {"ok": True}
 
     def pick_input_folder(self):
         result = self.window.create_file_dialog(webview.FOLDER_DIALOG)
@@ -80,10 +153,12 @@ class Api:
             return {"ok": False, "cancelled": True}
         return {"ok": True, "folder": result[0]}
 
-    def start_processing(self, input_folder, output_folder, api_key):
+    def start_processing(self, input_folder, output_folder):
+        if not self.api_key:
+            return {"ok": False, "error": "No API key configured. Ask your administrator to set one in the admin panel."}
         threading.Thread(
             target=self._run_batch,
-            args=(input_folder, output_folder, api_key),
+            args=(input_folder, output_folder),
             daemon=True,
         ).start()
         return {"ok": True}
@@ -97,7 +172,7 @@ class Api:
             f"window.onDesktopEvent({json.dumps(event)}, {json.dumps(payload)})"
         )
 
-    def _run_batch(self, input_folder, output_folder, api_key):
+    def _run_batch(self, input_folder, output_folder):
         self.cancelled = False
         pdf_names = sorted(
             f for f in os.listdir(input_folder)
@@ -106,7 +181,7 @@ class Api:
         total = len(pdf_names)
         self._emit("start", {"total": total})
 
-        headers = {"X-API-Key": api_key}
+        headers = {"X-API-Key": self.api_key}
         state = {"done": 0, "ok": 0, "err": 0}
         state_lock = threading.Lock()
 
@@ -166,7 +241,7 @@ class Api:
                 "files": [("files", (n, file_bytes[n], "application/pdf")) for n in chunk],
             }
 
-        status, body = fetch_json_with_retry(client, "POST", f"{API_BASE}/process/batch", build_kwargs)
+        status, body = fetch_json_with_retry(client, "POST", f"{self.api_base}/process/batch", build_kwargs)
 
         if body is None:
             return [{"pdf_name": n, "status": "error", "error": FRIENDLY_ERROR} for n in chunk]
@@ -186,7 +261,7 @@ class Api:
                 return {"pdf_name": pdf_name, "status": "error", "error": "Cancelled by user."}
 
             status, body = fetch_json_with_retry(
-                client, "GET", f"{API_BASE}/process/progress/{job_id}",
+                client, "GET", f"{self.api_base}/process/progress/{job_id}",
                 lambda: {"headers": headers},
             )
             if body is None:
@@ -205,7 +280,7 @@ class Api:
                 return {"pdf_name": pdf_name, "status": "error", "error": "Cancelled by user."}
 
             status, body = fetch_json_with_retry(
-                client, "GET", f"{API_BASE}/process/result/{call_id}",
+                client, "GET", f"{self.api_base}/process/result/{call_id}",
                 lambda: {"headers": headers},
             )
             if body is None:
@@ -231,4 +306,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        import tempfile
+        import traceback
+        Path(tempfile.gettempdir(), "PNRC-OCR-crash.log").write_text(traceback.format_exc(), encoding="utf-8")
+        raise

@@ -22,6 +22,8 @@
     --good-soft: #e6f4ea;
     --bad: #c22b2b;
     --bad-soft: #fbe8e8;
+    --admin: #9a3b12;
+    --admin-soft: #fbeee6;
     --shadow: 0 1px 2px rgba(0,0,0,0.05), 0 8px 24px rgba(0,0,0,0.08);
   }
   * { box-sizing: border-box; }
@@ -41,6 +43,8 @@
     box-shadow: var(--shadow);
     overflow: hidden;
   }
+  .screen { display: none; }
+  .screen.active { display: block; }
   .window-head { padding: 20px 26px; border-bottom: 1px solid var(--panel-border); }
   .window-head h1 { margin: 0 0 4px; font-size: 1.15rem; font-weight: 600; }
   .window-head p { margin: 0; color: var(--ink-dim); font-size: 0.86rem; }
@@ -50,11 +54,20 @@
     display: block; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em;
     text-transform: uppercase; color: var(--ink-faint); margin-bottom: 8px;
   }
-  input[type="password"] {
+  input[type="password"], input[type="text"], select {
     width: 100%; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.88rem;
     padding: 10px 12px; border-radius: 8px; border: 1px solid var(--panel-border);
-    background: var(--bg); color: var(--ink);
+    background: var(--bg); color: var(--ink); appearance: none;
   }
+  select {
+    background-image: linear-gradient(45deg, transparent 50%, var(--ink) 50%), linear-gradient(135deg, var(--ink) 50%, transparent 50%);
+    background-position: calc(100% - 18px) center, calc(100% - 13px) center;
+    background-size: 5px 5px, 5px 5px; background-repeat: no-repeat;
+  }
+  input:focus, select:focus { outline: 2px solid var(--ink); outline-offset: 1px; }
+  .field { margin-bottom: 12px; }
+  .field-note { margin: 8px 0 0; font-size: 0.75rem; color: var(--ink-faint); line-height: 1.55; }
+
   .folder-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .folder-btn {
     display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
@@ -110,57 +123,356 @@
   .write-log .entry { color: var(--ink-dim); }
   .write-log .entry .ok-mark { color: var(--good); }
   .write-log .entry .err-mark { color: var(--bad); }
-  .out-note { margin-top: 14px; font-size: 0.76rem; color: var(--ink-faint); line-height: 1.5; }
-  .out-note code { font-family: "IBM Plex Mono", ui-monospace, monospace; background: var(--track); padding: 1px 5px; border-radius: 4px; color: var(--ink-dim); }
+
+  /* ---- Login screens ---- */
+  .login-head { display: flex; justify-content: flex-end; padding: 16px 20px 0; }
+  .mode-link {
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.74rem; letter-spacing: 0.04em;
+    color: var(--ink-dim); background: none; border: 1px solid var(--panel-border); border-radius: 999px;
+    padding: 5px 12px; cursor: pointer; transition: background 140ms ease, color 140ms ease;
+  }
+  .mode-link:hover { background: var(--accent-soft); }
+  .mode-link.is-admin { color: var(--admin); border-color: var(--admin); background: var(--admin-soft); }
+
+  .login-body { padding: 8px 40px 40px; display: flex; flex-direction: column; align-items: center; }
+  .mark {
+    width: 76px; height: 76px; border-radius: 50%; border: 1.5px solid var(--panel-border);
+    display: flex; align-items: center; justify-content: center;
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-weight: 600; font-size: 1.5rem; letter-spacing: -0.02em;
+    margin: 4px 0 6px;
+  }
+  .login-title { font-size: 1.05rem; font-weight: 600; margin: 0 0 2px; }
+  .login-sub {
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.72rem; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--ink-faint); margin: 0 0 28px;
+  }
+  .login-sub.is-admin { color: var(--admin); }
+  .login-form { width: 100%; max-width: 320px; }
+  .login-form .field label {
+    display: block; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 6px;
+  }
+  .signin-btn {
+    width: 100%; margin-top: 10px; padding: 12px; border-radius: 9px; border: none;
+    font-family: inherit; font-weight: 600; font-size: 0.92rem; cursor: pointer;
+    background: var(--accent); color: var(--accent-ink); transition: opacity 140ms ease, background 140ms ease;
+  }
+  .signin-btn:hover { opacity: 0.92; }
+  .signin-btn.is-admin { background: var(--admin); }
+  .hint {
+    margin-top: 16px; font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.72rem; color: var(--ink-faint); text-align: center; line-height: 1.6;
+  }
+
+  /* ---- Admin panel ---- */
+  .bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 22px; border-bottom: 1px solid var(--panel-border);
+  }
+  .bar-title { display: flex; align-items: center; gap: 9px; }
+  .bar-title .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--admin); }
+  .bar-title h2 { margin: 0; font-size: 1rem; font-weight: 600; }
+  .bar-back {
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.74rem;
+    color: var(--ink-dim); background: none; border: none; cursor: pointer; padding: 4px;
+  }
+  .bar-back:hover { color: var(--ink); }
+  .panel-scroll { max-height: 480px; overflow-y: auto; }
+  .section-title {
+    display: flex; align-items: center; gap: 8px; font-size: 0.68rem; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--admin); margin: 0 0 14px;
+  }
+  .section-title .rule { flex: 1; height: 1px; background: var(--panel-border); opacity: 0.35; }
+  .gpu-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }
+  .gpu-opt {
+    border: 1px solid var(--panel-border); border-radius: 8px; padding: 10px 8px;
+    text-align: center; cursor: pointer; background: var(--bg);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    transition: background 140ms ease, border-color 140ms ease;
+  }
+  .gpu-opt .name { font-size: 0.84rem; font-weight: 600; }
+  .gpu-opt .spec { font-size: 0.66rem; color: var(--ink-faint); margin-top: 2px; }
+  .gpu-opt.sel { background: var(--admin-soft); border-color: var(--admin); }
+  .gpu-opt.sel .name { color: var(--admin); }
+  .gpu-opt:hover:not(.sel) { border-color: var(--ink); }
+  .stepper { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+  .stepper button {
+    width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--panel-border);
+    background: var(--bg); font-size: 1rem; cursor: pointer; font-family: "IBM Plex Mono", monospace;
+  }
+  .stepper button:hover { background: var(--accent-soft); }
+  .stepper button:disabled { opacity: 0.35; cursor: not-allowed; }
+  .stepper .val {
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 1.1rem; font-weight: 600;
+    min-width: 28px; text-align: center; font-variant-numeric: tabular-nums;
+  }
+  .stepper .cap { font-size: 0.72rem; color: var(--ink-faint); }
+  .save-row { padding: 18px 22px; display: flex; gap: 10px; }
+  .save-btn {
+    flex: 1; padding: 12px; border-radius: 9px; border: none; font-family: inherit;
+    font-weight: 600; font-size: 0.92rem; cursor: pointer; background: var(--admin); color: #fff;
+    transition: opacity 140ms ease;
+  }
+  .save-btn:hover { opacity: 0.92; }
+  .admin-note {
+    margin: 0 22px 14px; font-size: 0.76rem; color: var(--ink-faint); line-height: 1.5;
+  }
 </style>
 </head>
 <body>
 
 <div class="window">
-  <div class="window-head">
-    <h1>Batch document processing</h1>
-    <p>Select a folder of PDFs, choose where results go, and start.</p>
-  </div>
 
-  <div class="section">
-    <label class="field-label" for="apiKey">X-API-Key</label>
-    <input type="password" id="apiKey" placeholder="Paste your API key">
-  </div>
-
-  <div class="section">
-    <label class="field-label">Folders</label>
-    <div class="folder-row">
-      <button class="folder-btn" id="pickInput" type="button" disabled>
-        <span class="label">📁 Input folder</span>
-        <span class="value unset" id="inputPath">Not selected</span>
-      </button>
-      <button class="folder-btn" id="pickOutput" type="button" disabled>
-        <span class="label">💾 Output folder</span>
-        <span class="value unset" id="outputPath">Not selected</span>
-      </button>
+  <!-- Screen: user login -->
+  <div class="screen active" id="screen-login">
+    <div class="login-head">
+      <button class="mode-link" id="toAdminLoginBtn" type="button">Admin →</button>
     </div>
-    <div class="validation" id="validation"></div>
-    <div class="btn-row">
-      <button class="start-btn" id="startBtn" disabled>Start processing</button>
-      <button class="cancel-btn" id="cancelBtn" type="button">Cancel</button>
+    <div class="login-body">
+      <div class="mark">P</div>
+      <div class="login-title">PNRC OCR</div>
+      <div class="login-sub">Sign in to continue</div>
+      <div class="login-form">
+        <div class="field"><label>Username</label><input type="text" id="userUsername" autocomplete="username"></div>
+        <div class="field"><label>Password</label><input type="password" id="userPassword" autocomplete="current-password"></div>
+        <button class="signin-btn" id="userSigninBtn" type="button">Sign in</button>
+        <div class="validation" id="userLoginError"></div>
+      </div>
+      <div class="hint">Access set up by your administrator.</div>
     </div>
   </div>
 
-  <div class="section progress-wrap" id="progressSection">
-    <div class="progress-head">
-      <span class="progress-count" id="progressCount">0 / 0 files</span>
-      <span class="progress-pct" id="progressPct">0%</span>
+  <!-- Screen: admin login -->
+  <div class="screen" id="screen-loginAdmin">
+    <div class="login-head">
+      <button class="mode-link is-admin" id="toUserLoginBtn" type="button">← User</button>
     </div>
-    <div class="bar-track"><div class="bar-fill" id="barFill"></div></div>
-    <div class="stat-row">
-      <span class="good-txt" id="okCount">0 done</span>
-      <span class="bad-txt" id="errCount">0 errors</span>
+    <div class="login-body">
+      <div class="mark" style="border-color: var(--admin); color: var(--admin);">P</div>
+      <div class="login-title">PNRC OCR</div>
+      <div class="login-sub is-admin">Admin sign in</div>
+      <div class="login-form">
+        <div class="field"><label>Admin username</label><input type="text" id="adminUsername" autocomplete="username"></div>
+        <div class="field"><label>Admin password</label><input type="password" id="adminPassword" autocomplete="current-password"></div>
+        <button class="signin-btn is-admin" id="adminSigninBtn" type="button">Sign in as admin</button>
+        <div class="validation" id="adminLoginError"></div>
+      </div>
+      <div class="hint">Opens the API key and compute settings.</div>
     </div>
-    <div class="write-log" id="writeLog"></div>
   </div>
+
+  <!-- Screen: admin panel -->
+  <div class="screen" id="screen-admin">
+    <div class="bar">
+      <div class="bar-title"><span class="dot"></span><h2>Admin settings</h2></div>
+      <button class="bar-back" id="adminLogoutBtn" type="button">Log out</button>
+    </div>
+    <div class="panel-scroll">
+      <div class="section">
+        <div class="section-title">Access<span class="rule"></span></div>
+        <div class="field">
+          <label class="field-label">Modal API URL</label>
+          <input type="text" id="apiBaseInput" placeholder="https://your-workspace--pnrc-main-ocr-fastapi-app.modal.run">
+          <p class="field-note">The Modal deployment every user session on this machine connects to.</p>
+        </div>
+        <div class="field">
+          <label class="field-label">X-API-Key</label>
+          <input type="password" id="apiKeyInput" placeholder="Paste your API key">
+          <p class="field-note">Used by every user session on this machine — they won't need to enter it themselves.</p>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Compute — GPU type<span class="rule"></span></div>
+        <div class="gpu-grid" id="gpuGrid">
+          <div class="gpu-opt" data-gpu="T4"><div class="name">T4</div><div class="spec">~$0.59/hr</div></div>
+          <div class="gpu-opt" data-gpu="L4"><div class="name">L4</div><div class="spec">~$0.80/hr</div></div>
+          <div class="gpu-opt" data-gpu="A100"><div class="name">A100</div><div class="spec">~$2.10/hr</div></div>
+        </div>
+        <p class="field-note">Modal's per-GPU-hour rate, billed per second. Recorded here for reference only — applying a change requires redeploying the Modal backend from the project repo.</p>
+      </div>
+
+      <div class="section">
+        <label class="field-label">Max concurrent containers</label>
+        <div class="stepper">
+          <button type="button" id="containersMinus">−</button>
+          <span class="val" id="containersVal">6</span>
+          <button type="button" id="containersPlus">+</button>
+          <span class="cap">/ 10 plan cap</span>
+        </div>
+        <p class="field-note">How many PDFs process in parallel. This is Modal's GPU concurrency limit for the workspace — recorded here for reference; the live limit is set on the Modal deployment.</p>
+      </div>
+
+      <div class="section">
+        <label class="field-label">Scale-down window</label>
+        <select id="scaledownSelect">
+          <option value="15">15 seconds (current default)</option>
+          <option value="60">60 seconds</option>
+          <option value="300">5 minutes</option>
+        </select>
+        <p class="field-note">How long an idle container stays warm before shutting down. Recorded here for reference; the live value is set on the Modal deployment.</p>
+      </div>
+    </div>
+    <p class="admin-note" id="adminSaveError"></p>
+    <div class="save-row">
+      <button class="save-btn" id="adminSaveBtn" type="button">Save &amp; continue</button>
+    </div>
+  </div>
+
+  <!-- Screen: user app -->
+  <div class="screen" id="screen-app">
+    <div class="window-head" style="display:flex; align-items:flex-start; justify-content:space-between;">
+      <div>
+        <h1>Batch document processing</h1>
+        <p>Select a folder of PDFs, choose where results go, and start.</p>
+      </div>
+      <button class="bar-back" id="appLogoutBtn" type="button">Log out</button>
+    </div>
+
+    <div class="section">
+      <label class="field-label">Folders</label>
+      <div class="folder-row">
+        <button class="folder-btn" id="pickInput" type="button" disabled>
+          <span class="label">📁 Input folder</span>
+          <span class="value unset" id="inputPath">Not selected</span>
+        </button>
+        <button class="folder-btn" id="pickOutput" type="button" disabled>
+          <span class="label">💾 Output folder</span>
+          <span class="value unset" id="outputPath">Not selected</span>
+        </button>
+      </div>
+      <div class="validation" id="validation"></div>
+      <div class="btn-row">
+        <button class="start-btn" id="startBtn" disabled>Start processing</button>
+        <button class="cancel-btn" id="cancelBtn" type="button">Cancel</button>
+      </div>
+    </div>
+
+    <div class="section progress-wrap" id="progressSection">
+      <div class="progress-head">
+        <span class="progress-count" id="progressCount">0 / 0 files</span>
+        <span class="progress-pct" id="progressPct">0%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill" id="barFill"></div></div>
+      <div class="stat-row">
+        <span class="good-txt" id="okCount">0 done</span>
+        <span class="bad-txt" id="errCount">0 errors</span>
+      </div>
+      <div class="write-log" id="writeLog"></div>
+    </div>
+  </div>
+
 </div>
 
 <script>
+  function go(name) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById('screen-' + name).classList.add('active');
+  }
+
+  document.getElementById('toAdminLoginBtn').addEventListener('click', () => go('loginAdmin'));
+  document.getElementById('toUserLoginBtn').addEventListener('click', () => go('login'));
+
+  // ---- User login ----
+  const userUsername = document.getElementById('userUsername');
+  const userPassword = document.getElementById('userPassword');
+  const userLoginError = document.getElementById('userLoginError');
+
+  async function attemptUserLogin() {
+    const res = await window.pywebview.api.login(userUsername.value.trim(), userPassword.value);
+    if (!res.ok) {
+      userLoginError.textContent = '✕ Incorrect username or password.';
+      userLoginError.className = 'validation show bad';
+      return;
+    }
+    userLoginError.className = 'validation';
+    userPassword.value = '';
+    go('app');
+  }
+  document.getElementById('userSigninBtn').addEventListener('click', attemptUserLogin);
+  userPassword.addEventListener('keydown', e => { if (e.key === 'Enter') attemptUserLogin(); });
+
+  // ---- Admin login ----
+  const adminUsername = document.getElementById('adminUsername');
+  const adminPassword = document.getElementById('adminPassword');
+  const adminLoginError = document.getElementById('adminLoginError');
+
+  async function attemptAdminLogin() {
+    const res = await window.pywebview.api.admin_login(adminUsername.value.trim(), adminPassword.value);
+    if (!res.ok) {
+      adminLoginError.textContent = '✕ Incorrect admin username or password.';
+      adminLoginError.className = 'validation show bad';
+      return;
+    }
+    adminLoginError.className = 'validation';
+    adminPassword.value = '';
+    await loadAdminSettings();
+    go('admin');
+  }
+  document.getElementById('adminSigninBtn').addEventListener('click', attemptAdminLogin);
+  adminPassword.addEventListener('keydown', e => { if (e.key === 'Enter') attemptAdminLogin(); });
+
+  document.getElementById('adminLogoutBtn').addEventListener('click', () => go('login'));
+  document.getElementById('appLogoutBtn').addEventListener('click', () => go('login'));
+
+  // ---- Admin panel ----
+  const apiBaseInput = document.getElementById('apiBaseInput');
+  const apiKeyInput = document.getElementById('apiKeyInput');
+  const gpuGrid = document.getElementById('gpuGrid');
+  const containersVal = document.getElementById('containersVal');
+  const scaledownSelect = document.getElementById('scaledownSelect');
+  const adminSaveError = document.getElementById('adminSaveError');
+  let selectedGpu = 'L4';
+  let containerCount = 6;
+
+  gpuGrid.querySelectorAll('.gpu-opt').forEach(opt => {
+    opt.addEventListener('click', () => {
+      selectedGpu = opt.dataset.gpu;
+      gpuGrid.querySelectorAll('.gpu-opt').forEach(o => o.classList.toggle('sel', o === opt));
+    });
+  });
+
+  document.getElementById('containersMinus').addEventListener('click', () => {
+    containerCount = Math.max(1, containerCount - 1);
+    containersVal.textContent = containerCount;
+  });
+  document.getElementById('containersPlus').addEventListener('click', () => {
+    containerCount = Math.min(10, containerCount + 1);
+    containersVal.textContent = containerCount;
+  });
+
+  async function loadAdminSettings() {
+    const s = await window.pywebview.api.get_admin_settings();
+    apiBaseInput.value = s.api_base || '';
+    apiKeyInput.value = s.api_key || '';
+    selectedGpu = s.gpu_type || 'L4';
+    gpuGrid.querySelectorAll('.gpu-opt').forEach(o => o.classList.toggle('sel', o.dataset.gpu === selectedGpu));
+    containerCount = s.max_containers || 6;
+    containersVal.textContent = containerCount;
+    scaledownSelect.value = String(s.scaledown_window || 15);
+    adminSaveError.textContent = '';
+  }
+
+  document.getElementById('adminSaveBtn').addEventListener('click', async () => {
+    const apiBase = apiBaseInput.value.trim();
+    const apiKey = apiKeyInput.value.trim();
+    if (!apiBase || !apiKey) {
+      adminSaveError.textContent = '✕ Modal API URL and X-API-Key are both required.';
+      adminSaveError.style.color = 'var(--bad)';
+      return;
+    }
+    await window.pywebview.api.save_admin_settings({
+      api_base: apiBase,
+      api_key: apiKey,
+      gpu_type: selectedGpu,
+      max_containers: containerCount,
+      scaledown_window: parseInt(scaledownSelect.value, 10),
+    });
+    adminSaveError.textContent = '';
+    go('app');
+  });
+
+  // ---- User app ----
   const pickInputBtn = document.getElementById('pickInput');
   const pickOutputBtn = document.getElementById('pickOutput');
   const inputPathEl = document.getElementById('inputPath');
@@ -168,7 +480,6 @@
   const validationEl = document.getElementById('validation');
   const startBtn = document.getElementById('startBtn');
   const cancelBtn = document.getElementById('cancelBtn');
-  const apiKeyInput = document.getElementById('apiKey');
 
   const progressSection = document.getElementById('progressSection');
   const progressCount = document.getElementById('progressCount');
@@ -182,14 +493,25 @@
   let outputFolder = null;
 
   function updateStartEnabled() {
-    startBtn.disabled = !(inputFolder && outputFolder && apiKeyInput.value.trim());
+    startBtn.disabled = !(inputFolder && outputFolder);
   }
-  apiKeyInput.addEventListener('input', updateStartEnabled);
 
-  window.addEventListener('pywebviewready', () => {
+  function enableFolderButtons() {
     pickInputBtn.disabled = false;
     pickOutputBtn.disabled = false;
-  });
+  }
+
+  if (window.pywebview && window.pywebview.api) {
+    enableFolderButtons();
+  } else {
+    window.addEventListener('pywebviewready', enableFolderButtons);
+    const readyPoll = setInterval(() => {
+      if (window.pywebview && window.pywebview.api) {
+        clearInterval(readyPoll);
+        enableFolderButtons();
+      }
+    }, 200);
+  }
 
   pickInputBtn.addEventListener('click', async () => {
     const res = await window.pywebview.api.pick_input_folder();
@@ -231,7 +553,14 @@
     progressCount.textContent = '0 / 0 files';
     progressPct.textContent = '0%';
 
-    await window.pywebview.api.start_processing(inputFolder, outputFolder, apiKeyInput.value.trim());
+    const res = await window.pywebview.api.start_processing(inputFolder, outputFolder);
+    if (!res.ok) {
+      progressSection.classList.remove('show');
+      cancelBtn.classList.remove('show');
+      startBtn.disabled = false;
+      validationEl.textContent = `✕ ${res.error}`;
+      validationEl.className = 'validation show bad';
+    }
   });
 
   cancelBtn.addEventListener('click', async () => {
