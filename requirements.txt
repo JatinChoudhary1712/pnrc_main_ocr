@@ -1,7 +1,6 @@
 fastapi 
 modal 
 numpy 
-ollama 
 pillow 
 pymupdf 
 python-dotenv 

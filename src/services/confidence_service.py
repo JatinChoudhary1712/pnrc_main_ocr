@@ -14,13 +14,14 @@ def score_page_confidence(
     fraction_threshold=LOW_CONFIDENCE_FRACTION_THRESHOLD,
     min_run_length=LOW_CONFIDENCE_RUN_LENGTH,
 ):
+    """`token_logprobs` is a list of per-token logprob floats (or None/[] for empty pages)."""
     if not token_logprobs:
         return {
             "is_low_confidence": False,
             "has_low_confidence_run": False,
         }
 
-    confidences = [math.exp(lp.logprob) for lp in token_logprobs]
+    confidences = [math.exp(lp) for lp in token_logprobs]
 
     fraction_below_threshold = sum(1 for c in confidences if c < token_threshold) / len(confidences)
 

@@ -1,11 +1,20 @@
-import os
-import tempfile
+import base64
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import httpx
-from tqdm import tqdm
 
-from src.config import CPU_CORES, OCR_MODEL_NAME, OCR_PROMPT
-from src.dependencies.ollama_client import ollama_client
+from src.config import (
+    OCR_CONCURRENCY,
+    OCR_MAX_TOKENS,
+    OCR_MODEL_NAME,
+    OCR_PROMPT,
+    OCR_REASONING,
+    OCR_TEMPERATURE,
+    OCR_TOP_K,
+    OCR_TOP_P,
+)
+from src.dependencies.vllm_client import vllm_client
 from src.services.confidence_service import score_page_confidence
 from src.utils.text_utils import clean_repetitions
 
@@ -21,89 +30,84 @@ def empty_page_result(page_number):
     }
 
 
-def ocr_page(image_path):
-    resp = ollama_client.chat(
-        model=OCR_MODEL_NAME,
-        messages=[
+def ocr_page(image_png: bytes):
+    """OCR one page PNG against the vLLM server. Returns (text, [logprob floats]).
+
+    Relies on --reasoning-parser muse_glimmer: the transcription comes back in
+    message.content, the model's chain-of-thought in reasoning_content (ignored).
+    """
+    data_url = "data:image/png;base64," + base64.b64encode(image_png).decode()
+    payload = {
+        "model": OCR_MODEL_NAME,
+        "temperature": OCR_TEMPERATURE,
+        "top_p": OCR_TOP_P,
+        "top_k": OCR_TOP_K,
+        "max_tokens": OCR_MAX_TOKENS,
+        "logprobs": True,
+        "top_logprobs": 1,
+        "messages": [
+            {"role": "system", "content": f"Reasoning strength: {OCR_REASONING}"},
             {
                 "role": "user",
-                "content": OCR_PROMPT,
-                "images": [str(image_path)],
-            }
+                "content": [
+                    {"type": "text", "text": OCR_PROMPT},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            },
         ],
-        options={
-            "temperature": 0,
-            "repeat_penalty": 1.1,
-            "repeat_last_n": 128,
-            "num_predict": 2048,
-            "num_thread": CPU_CORES,
-            "cache_prompt": False,
-            "stop": [
-                "The text in the image is as follows",
-                "The image contains",
-                "I see",
-                "Wait,",
-                "Here is the transcription",
-            ],
-        },
-        logprobs=True,
-        top_logprobs=1,
-    )
+    }
 
-    return resp["message"]["content"], resp.logprobs
+    last_err = None
+    for attempt in range(4):
+        try:
+            resp = vllm_client.post("/chat/completions", json=payload)
+            if resp.status_code >= 500:
+                raise httpx.HTTPStatusError(
+                    f"HTTP {resp.status_code}", request=resp.request, response=resp
+                )
+            resp.raise_for_status()
+            break
+        except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+            last_err = exc
+            time.sleep(min(20, 5 * (attempt + 1)))
+    else:
+        raise RuntimeError(f"vLLM OCR failed after retries: {last_err}")
+
+    choice = resp.json()["choices"][0]
+    text = choice["message"].get("content") or ""
+    entries = (choice.get("logprobs") or {}).get("content") or []
+    return text, [e["logprob"] for e in entries]
 
 
-def get_ocr_device():
-    for model in ollama_client.ps().get("models", []):
-        if model.get("model") != OCR_MODEL_NAME:
-            continue
-
-        size_vram = model.get("size_vram", 0)
-        if size_vram == 0:
-            return "CPU"
-
-        return "GPU" if size_vram >= model.get("size", 1) else "cpu+gpu (partial offload)"
-
-    return "not loaded"
+def _ocr_one(item):
+    text, logprobs = ocr_page(item["image_png"])
+    cleaned = clean_repetitions(text).strip()
+    conf = score_page_confidence(logprobs)
+    result = {
+        "page": item["page"],
+        "status": "filled",
+        "text": cleaned or None,
+        "confidence": conf,
+        "need_review": conf["is_low_confidence"],
+    }
+    if "pdf_name" in item:
+        result["pdf_name"] = item["pdf_name"]
+    return result
 
 
 def ocr_image_payloads(pages_payload, on_progress=None):
-    """OCR filled page PNG bytes. Runs on the Modal GPU worker."""
-
+    """OCR filled page PNG bytes concurrently against the vLLM server."""
     total = len(pages_payload)
+    done = 0
     results = []
-    pbar = tqdm(pages_payload, desc=f"OCR - Model name : {OCR_MODEL_NAME}")
-    for i, item in enumerate(pbar):
-        fd, image_path = tempfile.mkstemp(suffix=".png")
-        try:
-            with os.fdopen(fd, "wb") as f:
-                f.write(item["image_png"])
 
-            try:
-                text, logprobs = ocr_page(image_path)
-            except httpx.RemoteProtocolError:
-                text, logprobs = ocr_page(image_path)
-        finally:
-            os.unlink(image_path)
+    with ThreadPoolExecutor(max_workers=OCR_CONCURRENCY) as pool:
+        futures = [pool.submit(_ocr_one, item) for item in pages_payload]
+        for fut in as_completed(futures):
+            results.append(fut.result())
+            done += 1
+            if on_progress:
+                on_progress(done, total)
 
-        cleaned = clean_repetitions(text).strip()
-        conf = score_page_confidence(logprobs)
-        result = {
-            "page": item["page"],
-            "status": "filled",
-            "text": cleaned if cleaned else None,
-            "confidence": conf,
-            "need_review": conf["is_low_confidence"],
-        }
-        if "pdf_name" in item:
-            result["pdf_name"] = item["pdf_name"]
-        results.append(result)
-
-        if on_progress:
-            on_progress(i + 1, total)
-
-        if i == 0:
-            device = get_ocr_device()
-            pbar.set_description(f"OCR - Model name : {OCR_MODEL_NAME} and on Device {device}")
-
+    results.sort(key=lambda r: r["page"])
     return results

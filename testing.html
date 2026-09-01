@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PNRC OCR — vLLM Concurrency Bench</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #000000;
+    --border: #000000;
+    --muted: #666666;
+    --hover: #f0f0f0;
+    --ok: #0a7d0a;
+    --warn: #b35900;
+    --err: #b00020;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.4;
+  }
+  header {
+    border-bottom: 2px solid var(--border);
+    padding: 16px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  header h1 { font-size: 16px; letter-spacing: 0.5px; text-transform: uppercase; margin: 0; }
+  main { max-width: 1080px; margin: 0 auto; padding: 20px 24px 60px; }
+  .mono { font-family: "SF Mono", ui-monospace, Consolas, monospace; }
+  label {
+    display: block; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.5px; color: var(--muted); margin-bottom: 4px;
+  }
+  input[type="text"], input[type="number"], textarea, select {
+    width: 100%; padding: 7px 9px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--fg); font-size: 13px; font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 80px; }
+  fieldset { border: 1px solid var(--border); margin: 0 0 16px; padding: 14px 16px 16px; }
+  legend { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; padding: 0 6px; }
+  .grid { display: grid; gap: 12px; }
+  .g2 { grid-template-columns: repeat(2, 1fr); }
+  .g3 { grid-template-columns: repeat(3, 1fr); }
+  .g4 { grid-template-columns: repeat(4, 1fr); }
+  @media (max-width: 720px) { .g2, .g3, .g4 { grid-template-columns: 1fr 1fr; } }
+
+  .dropzone {
+    border: 2px dashed var(--border); padding: 22px; text-align: center;
+    cursor: pointer; margin-bottom: 12px;
+  }
+  .dropzone.drag { background: var(--hover); }
+  .dropzone p { margin: 3px 0; }
+  .dropzone .hint { font-size: 12px; color: var(--muted); }
+  input[type="file"] { display: none; }
+
+  .filelist { list-style: none; padding: 0; margin: 0 0 14px; border: 1px solid var(--border); }
+  .filelist:empty { display: none; }
+  .filelist li {
+    display: flex; justify-content: space-between; padding: 6px 10px;
+    border-bottom: 1px solid var(--border); font-size: 13px;
+  }
+  .filelist li:last-child { border-bottom: none; }
+  .filelist button { background: none; border: none; color: var(--fg); cursor: pointer; text-decoration: underline; font-size: 13px; }
+
+  .actions { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
+  button.primary, button.secondary {
+    padding: 10px 18px; border: 1px solid var(--border); background: var(--fg); color: var(--bg);
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer;
+  }
+  button.secondary { background: var(--bg); color: var(--fg); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.primary:hover:not(:disabled) { background: #222; }
+  button.secondary:hover:not(:disabled) { background: var(--hover); }
+
+  .status-line { font-size: 12px; color: var(--muted); }
+  .big { font-size: 20px; }
+
+  table.summary { border-collapse: collapse; width: 100%; margin-bottom: 18px; font-size: 13px; }
+  table.summary td { border: 1px solid var(--border); padding: 6px 10px; }
+  table.summary td:first-child { text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; color: var(--muted); width: 40%; }
+
+  .job { border: 1px solid var(--border); margin-bottom: 12px; }
+  .job-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 9px 14px; cursor: pointer; gap: 10px;
+  }
+  .job-head:hover { background: var(--hover); }
+  .job-name { font-weight: 600; font-size: 14px; word-break: break-all; }
+  .job-meta { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .badge {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+    border: 1px solid var(--border); padding: 2px 8px; white-space: nowrap;
+  }
+  .badge.running { color: var(--muted); border-color: var(--muted); }
+  .badge.done { background: var(--fg); color: var(--bg); }
+  .badge.error { background: var(--err); border-color: var(--err); color: #fff; }
+  .bar-track {
+    height: 16px; background: var(--hover); position: relative;
+    border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  }
+  .bar-fill { height: 100%; width: 0%; background: var(--fg); transition: width 0.2s ease; }
+  .bar-label {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase;
+    color: #fff; mix-blend-mode: difference; pointer-events: none;
+  }
+  .job-body { padding: 0; display: none; border-top: 1px solid var(--border); }
+  .job-body.open { display: block; }
+  .page-row {
+    display: grid; grid-template-columns: 60px 90px 90px 110px 1fr; gap: 8px;
+    padding: 6px 14px; border-bottom: 1px solid var(--hover); font-size: 12px; align-items: baseline;
+  }
+  .page-row:last-child { border-bottom: none; }
+  .page-row .txt { font-family: "SF Mono", ui-monospace, Consolas, monospace; white-space: pre-wrap; color: var(--fg); }
+  .page-row .lc-hi { color: var(--err); font-weight: 700; }
+  .hint-sm { font-size: 11px; color: var(--muted); margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>OCR Concurrency Bench · vLLM</h1>
+  <span class="status-line"><span class="mono big" id="totalTimer">00:00.0</span> <span id="statusText"></span></span>
+</header>
+
+<main>
+
+  <fieldset>
+    <legend>Endpoint</legend>
+    <div class="grid g2">
+      <div>
+        <label for="baseUrl">vLLM Base URL (OpenAI, ends /v1)</label>
+        <input type="text" id="baseUrl" placeholder="https://xxxx-8000.proxy.runpod.net/v1" />
+      </div>
+      <div>
+        <label for="apiKey">API Key (--api-key)</label>
+        <input type="text" id="apiKey" placeholder="2121321" />
+      </div>
+    </div>
+    <div class="grid g2" style="margin-top:12px">
+      <div>
+        <label for="model">served-model-name</label>
+        <input type="text" id="model" value="muse-glimmer" />
+      </div>
+      <div style="display:flex;align-items:flex-end;gap:8px">
+        <button class="secondary" id="pingBtn" type="button">Test /v1/models</button>
+        <span class="status-line" id="pingResult"></span>
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Generation config</legend>
+    <div class="grid g4">
+      <div><label for="temperature">temperature</label><input type="number" id="temperature" value="1.0" step="0.05" min="0" /></div>
+      <div><label for="topP">top_p</label><input type="number" id="topP" value="0.95" step="0.01" min="0" max="1" /></div>
+      <div><label for="topK">top_k</label><input type="number" id="topK" value="64" step="1" min="-1" /></div>
+      <div><label for="maxTokens">max_tokens (output)</label><input type="number" id="maxTokens" value="4096" step="128" min="64" /></div>
+    </div>
+    <div class="grid g3" style="margin-top:12px">
+      <div>
+        <label for="reasoning">reasoning strength (system prompt)</label>
+        <select id="reasoning">
+          <option value="low" selected>low</option>
+          <option value="medium">medium</option>
+          <option value="high">high</option>
+          <option value="xhigh">xhigh</option>
+          <option value="">(none)</option>
+        </select>
+      </div>
+      <div><label for="dpi">render DPI (context/page size)</label><input type="number" id="dpi" value="150" step="10" min="72" /></div>
+      <div><label for="rate">GPU $/hr (for cost calc)</label><input type="number" id="rate" value="2.09" step="0.01" min="0" /></div>
+    </div>
+    <div style="margin-top:12px">
+      <label for="prompt">OCR prompt</label>
+      <textarea id="prompt"></textarea>
+      <div class="hint-sm">context window ("max-model-len") is a server launch flag, not per-request — DPI controls how many image tokens each page costs.</div>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Concurrency</legend>
+    <div class="grid g3">
+      <div><label for="pdfConcurrency">PDFs at once</label><input type="number" id="pdfConcurrency" value="4" step="1" min="1" max="64" /></div>
+      <div><label for="pagesPerPdf">pages/PDF concurrent</label><input type="number" id="pagesPerPdf" value="3" step="1" min="1" max="64" /></div>
+      <div><label for="logprobs">request logprobs?</label>
+        <select id="logprobs"><option value="1" selected>yes (confidence)</option><option value="0">no</option></select>
+      </div>
+    </div>
+    <div class="hint-sm" id="maxInflightHint"></div>
+    <div style="margin-top:6px"><span class="status-line" id="inflight"></span></div>
+  </fieldset>
+
+  <div class="dropzone" id="dropzone">
+    <p><strong>Click to choose PDFs</strong> or drag &amp; drop</p>
+    <p class="hint">Rendered to PNG in the browser, then OCR'd page-by-page</p>
+    <input type="file" id="fileInput" accept="application/pdf" multiple />
+  </div>
+  <ul class="filelist" id="fileList"></ul>
+
+  <div class="actions">
+    <button class="primary" id="runBtn" disabled>Run bench</button>
+    <button class="secondary" id="clearBtn" type="button">Clear</button>
+    <span class="status-line" id="renderStatus"></span>
+  </div>
+
+  <table class="summary" id="summary" style="display:none">
+    <tr><td>Concurrency (in-flight)</td><td class="mono" id="s_conc">—</td></tr>
+    <tr><td>PDFs / pages</td><td class="mono" id="s_pages">—</td></tr>
+    <tr><td>Total wall time</td><td class="mono" id="s_wall">—</td></tr>
+    <tr><td>Throughput</td><td class="mono" id="s_tput">—</td></tr>
+    <tr><td>Page latency avg / p50 / p95 / max</td><td class="mono" id="s_lat">—</td></tr>
+    <tr><td>Per-PDF wall avg / p50 / p95 / max</td><td class="mono" id="s_pdflat">—</td></tr>
+    <tr><td>Output tokens (sum / avg)</td><td class="mono" id="s_tok">—</td></tr>
+    <tr><td>Low-confidence pages</td><td class="mono" id="s_lc">—</td></tr>
+    <tr><td>Errors</td><td class="mono" id="s_err">—</td></tr>
+    <tr><td>Est. GPU cost (wall × $/hr)</td><td class="mono" id="s_cost">—</td></tr>
+  </table>
+
+  <div id="jobs"></div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const $ = (id) => document.getElementById(id);
+const els = {
+  baseUrl: $("baseUrl"), apiKey: $("apiKey"), model: $("model"),
+  temperature: $("temperature"), topP: $("topP"), topK: $("topK"), maxTokens: $("maxTokens"),
+  reasoning: $("reasoning"), dpi: $("dpi"), rate: $("rate"), prompt: $("prompt"),
+  pdfConcurrency: $("pdfConcurrency"), pagesPerPdf: $("pagesPerPdf"), logprobs: $("logprobs"),
+  dropzone: $("dropzone"), fileInput: $("fileInput"), fileList: $("fileList"),
+  runBtn: $("runBtn"), clearBtn: $("clearBtn"), renderStatus: $("renderStatus"),
+  totalTimer: $("totalTimer"), statusText: $("statusText"), inflight: $("inflight"),
+  summary: $("summary"), jobs: $("jobs"), pingBtn: $("pingBtn"), pingResult: $("pingResult"),
+};
+
+const DEFAULT_PROMPT = `You are an OCR text recognition engine.
+
+Transcribe all visible text in the image exactly as it appears.
+
+Rules:
+
+* Output only the recognized text. Do not add explanations, comments, or descriptions.
+* Do not format the output as Markdown.
+* Preserve the original line breaks and paragraph structure.
+* Preserve the original reading order.
+* Preserve spelling, capitalization, punctuation, numbers, symbols, and special characters exactly as visible.
+* Do not correct spelling or grammar.
+* Do not translate the text.
+* Do not summarize, interpret, or infer missing text.
+* Do not add text that is not visibly present.
+* If a character or word is unclear, make the best OCR transcription based only on what is visible.
+* Preserve tables and structured text using plain text while maintaining their visual reading order.
+* Include headers, footers, labels, handwritten text, stamps, and other visible text when readable.
+* Ignore purely visual elements that contain no text.
+* Stop immediately after the last visible character.
+
+Return only the transcription.`;
+
+// ---- persistence ----
+const CFG_KEYS = ["baseUrl","apiKey","model","temperature","topP","topK","maxTokens","reasoning","dpi","rate","prompt","pdfConcurrency","pagesPerPdf","logprobs"];
+function loadCfg() {
+  const saved = JSON.parse(localStorage.getItem("ocr_bench_cfg") || "{}");
+  CFG_KEYS.forEach(k => { if (saved[k] !== undefined) els[k].value = saved[k]; });
+  if (!els.prompt.value) els.prompt.value = DEFAULT_PROMPT;
+}
+function saveCfg() {
+  const o = {};
+  CFG_KEYS.forEach(k => o[k] = els[k].value);
+  localStorage.setItem("ocr_bench_cfg", JSON.stringify(o));
+}
+CFG_KEYS.forEach(k => els[k].addEventListener("change", saveCfg));
+loadCfg();
+
+function updMaxHint() {
+  const a = Math.max(1, +els.pdfConcurrency.value || 1);
+  const b = Math.max(1, +els.pagesPerPdf.value || 1);
+  $("maxInflightHint").textContent =
+    `max in-flight ≈ ${a} PDF × ${b} pages = ${a * b} concurrent OCR requests to vLLM`;
+}
+els.pdfConcurrency.addEventListener("input", updMaxHint);
+els.pagesPerPdf.addEventListener("input", updMaxHint);
+updMaxHint();
+
+const baseUrl = () => els.baseUrl.value.trim().replace(/\/+$/, "");
+const authHeaders = () => {
+  const h = { "Content-Type": "application/json" };
+  if (els.apiKey.value.trim()) h["Authorization"] = "Bearer " + els.apiKey.value.trim();
+  return h;
+};
+
+// ---- ping ----
+els.pingBtn.addEventListener("click", async () => {
+  els.pingResult.textContent = "…";
+  try {
+    const r = await fetch(baseUrl() + "/models", { headers: authHeaders() });
+    const j = await r.json();
+    els.pingResult.textContent = r.ok
+      ? "OK — " + (j.data || []).map(m => m.id).join(", ")
+      : "HTTP " + r.status;
+  } catch (e) { els.pingResult.textContent = "FAIL: " + e.message; }
+});
+
+// ---- file select ----
+let files = [];
+els.dropzone.addEventListener("click", () => els.fileInput.click());
+els.dropzone.addEventListener("dragover", e => { e.preventDefault(); els.dropzone.classList.add("drag"); });
+els.dropzone.addEventListener("dragleave", () => els.dropzone.classList.remove("drag"));
+els.dropzone.addEventListener("drop", e => {
+  e.preventDefault(); els.dropzone.classList.remove("drag");
+  addFiles(Array.from(e.dataTransfer.files).filter(f => f.type === "application/pdf"));
+});
+els.fileInput.addEventListener("change", () => { addFiles(Array.from(els.fileInput.files)); els.fileInput.value = ""; });
+function addFiles(fs) {
+  for (const f of fs) if (!files.some(x => x.name === f.name && x.size === f.size)) files.push(f);
+  renderFileList();
+}
+function renderFileList() {
+  els.fileList.innerHTML = "";
+  files.forEach((f, i) => {
+    const li = document.createElement("li");
+    li.innerHTML = `<span>${escapeHtml(f.name)} <span style="color:var(--muted)">(${(f.size/1024).toFixed(0)} KB)</span></span>`;
+    const b = document.createElement("button");
+    b.textContent = "remove";
+    b.onclick = () => { files.splice(i, 1); renderFileList(); };
+    li.appendChild(b);
+    els.fileList.appendChild(li);
+  });
+  els.runBtn.disabled = files.length === 0;
+}
+els.clearBtn.addEventListener("click", () => {
+  files = []; renderFileList(); els.jobs.innerHTML = ""; els.summary.style.display = "none";
+  els.statusText.textContent = ""; els.renderStatus.textContent = ""; els.totalTimer.textContent = "00:00.0";
+});
+function escapeHtml(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+
+// ---- timer ----
+let timerRAF = null, timerStart = 0;
+function fmt(ms) {
+  const s = ms / 1000;
+  return `${String(Math.floor(s/60)).padStart(2,"0")}:${(s%60).toFixed(1).padStart(4,"0")}`;
+}
+function startTimer() {
+  timerStart = performance.now();
+  const tick = () => { els.totalTimer.textContent = fmt(performance.now() - timerStart); timerRAF = requestAnimationFrame(tick); };
+  tick();
+}
+function stopTimer() { cancelAnimationFrame(timerRAF); return performance.now() - timerStart; }
+
+// ---- render a PDF page-by-page, emitting each page's PNG as soon as it's ready ----
+// so OCR can start on early pages while later pages are still rendering.
+async function renderPdf(file, dpi, onStart, onPage) {
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  const scale = dpi / 72;
+  if (onStart) onStart(pdf.numPages);
+  for (let n = 1; n <= pdf.numPages; n++) {
+    const page = await pdf.getPage(n);
+    const vp = page.getViewport({ scale });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.ceil(vp.width); canvas.height = Math.ceil(vp.height);
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
+    const dataUrl = canvas.toDataURL("image/png");
+    page.cleanup();
+    if (onPage) onPage(n, pdf.numPages, dataUrl);
+    await new Promise(r => setTimeout(r, 0)); // yield so the UI updates
+  }
+}
+
+// ---- one OCR request ----
+async function ocrPage(dataUrl) {
+  const wantLp = els.logprobs.value === "1";
+  const messages = [];
+  if (els.reasoning.value) messages.push({ role: "system", content: "Reasoning strength: " + els.reasoning.value });
+  messages.push({ role: "user", content: [
+    { type: "text", text: els.prompt.value },
+    { type: "image_url", image_url: { url: dataUrl } },
+  ]});
+  const body = {
+    model: els.model.value.trim(),
+    temperature: parseFloat(els.temperature.value),
+    top_p: parseFloat(els.topP.value),
+    top_k: parseInt(els.topK.value, 10),
+    max_tokens: parseInt(els.maxTokens.value, 10),
+    messages,
+  };
+  if (wantLp) { body.logprobs = true; body.top_logprobs = 1; }
+
+  const t0 = performance.now();
+  const r = await fetch(baseUrl() + "/chat/completions", { method: "POST", headers: authHeaders(), body: JSON.stringify(body) });
+  const elapsed = performance.now() - t0;
+  if (!r.ok) throw new Error("HTTP " + r.status + ": " + (await r.text()).slice(0, 200));
+  const j = await r.json();
+  const choice = j.choices[0];
+  const text = (choice.message.content || "").trim();
+  const lp = (choice.logprobs && choice.logprobs.content) || [];
+  const confs = lp.map(e => Math.exp(e.logprob));
+  const lowFrac = confs.length ? confs.filter(c => c < 0.7).length / confs.length : 0;
+  return { text, elapsed, nTokens: lp.length, finish: choice.finish_reason, lowFrac };
+}
+
+// ---- generic concurrency pool ----
+async function runPool(tasks, limit, onEach) {
+  let i = 0, active = 0;
+  return new Promise((resolve) => {
+    const next = () => {
+      if (i >= tasks.length && active === 0) return resolve();
+      while (active < limit && i < tasks.length) {
+        const idx = i++; active++;
+        Promise.resolve(tasks[idx]())
+          .then(res => onEach(idx, res, null))
+          .catch(err => onEach(idx, null, err))
+          .finally(() => { active--; next(); });
+      }
+    };
+    next();
+  });
+}
+
+// ---- true global in-flight tracking (across the nested PDF/page pools) ----
+let globalInFlight = 0, peakInFlight = 0;
+function showInFlight() {
+  els.inflight.textContent = `in-flight: ${globalInFlight}   (peak ${peakInFlight})`;
+}
+async function ocrPageTracked(dataUrl) {
+  globalInFlight++;
+  peakInFlight = Math.max(peakInFlight, globalInFlight);
+  showInFlight();
+  try { return await ocrPage(dataUrl); }
+  finally { globalInFlight--; showInFlight(); }
+}
+
+// ---- run ----
+els.runBtn.addEventListener("click", async () => {
+  saveCfg();
+  els.runBtn.disabled = true; els.clearBtn.disabled = true;
+  els.jobs.innerHTML = ""; els.summary.style.display = "none";
+  const dpi = parseInt(els.dpi.value, 10);
+  const pdfConc = Math.max(1, parseInt(els.pdfConcurrency.value, 10));
+  const pagesPerPdf = Math.max(1, parseInt(els.pagesPerPdf.value, 10));
+
+  // Pipeline: render + OCR overlap. The PDF pool renders each PDF page-by-page
+  // and dispatches every page to the model the moment it's rendered, so the GPU
+  // is fed within seconds instead of waiting for all PDFs to finish rendering.
+  els.statusText.textContent = `running · ${pdfConc} PDF × ${pagesPerPdf} pg`;
+  els.renderStatus.textContent = "";
+  startTimer();
+  const latencies = [], pdfWalls = [];
+  let tokSum = 0, lcPages = 0, errCount = 0, renderedTotal = 0;
+  globalInFlight = 0; peakInFlight = 0; showInFlight();
+
+  const jobs = files.map((f, ji) => ({
+    id: "job" + ji, file: f, total: 0, results: [], doneCount: 0,
+    renderedCount: 0, errors: 0, startedAt: null, endedAt: null, renderError: null,
+  }));
+  jobs.forEach(renderJobCard);
+
+  function onPage(job, pi, res, err) {
+    if (err) {
+      job.errors++; errCount++;
+      job.results[pi] = { error: err.message || String(err) };
+    } else {
+      job.results[pi] = res;
+      latencies.push(res.elapsed);
+      tokSum += res.nTokens;
+      if (res.lowFrac > 0.1) lcPages++;
+    }
+    job.doneCount++;
+    updateJobCard(job);
+  }
+
+  async function processPdf(job) {
+    job.startedAt = performance.now();
+    setBadge(job, "rendering"); updateJobCard(job);
+
+    let active = 0, settled = 0, renderDone = false, resolveAll;
+    const queue = [];
+    const allDone = new Promise(r => { resolveAll = r; });
+    const checkDone = () => { if (renderDone && settled >= job.total) resolveAll(); };
+    const pump = () => {
+      while (active < pagesPerPdf && queue.length) {
+        const { pi, dataUrl } = queue.shift();
+        active++;
+        ocrPageTracked(dataUrl)
+          .then(res => onPage(job, pi, res, null))
+          .catch(err => onPage(job, pi, null, err))
+          .finally(() => { active--; settled++; pump(); checkDone(); });
+      }
+    };
+
+    try {
+      await renderPdf(job.file, dpi,
+        (numPages) => {
+          job.total = numPages;
+          job.results = new Array(numPages).fill(null);
+          setBadge(job, "running"); updateJobCard(job);
+        },
+        (n, tot, dataUrl) => {
+          job.renderedCount = n; renderedTotal++;
+          els.renderStatus.textContent = `rendered ${renderedTotal} pages`;
+          queue.push({ pi: n - 1, dataUrl });
+          pump(); updateJobCard(job);
+        });
+    } catch (e) {
+      job.renderError = e.message || String(e);
+      setBadge(job, "error"); updateJobCard(job);
+      return;
+    }
+
+    renderDone = true; checkDone();
+    if (job.total > 0) await allDone;
+
+    job.endedAt = performance.now();
+    pdfWalls.push(job.endedAt - job.startedAt);
+    setBadge(job, job.errors ? "error" : "done");
+    updateJobCard(job);
+  }
+
+  await runPool(jobs.map(job => () => processPdf(job)), pdfConc, () => {});
+
+  const wall = stopTimer();
+  const runnable = jobs.filter(j => !j.renderError);
+  const totalPages = runnable.reduce((s, j) => s + j.total, 0);
+  els.statusText.textContent = "done";
+  els.renderStatus.textContent = "";
+  els.runBtn.disabled = false; els.clearBtn.disabled = false;
+  globalInFlight = 0; showInFlight();
+  if (!totalPages) { els.summary.style.display = "none"; return; }
+
+  // 4. summary
+  const stats = (arr) => {
+    if (!arr.length) return [0, 0, 0, 0];
+    const s = [...arr].sort((a, b) => a - b);
+    const p = (q) => s[Math.min(s.length - 1, Math.floor(q * s.length))];
+    return [s.reduce((a, b) => a + b, 0) / s.length, p(0.5), p(0.95), s[s.length - 1]];
+  };
+  const secs = (a) => a.map(x => (x / 1000).toFixed(1) + "s").join(" / ");
+  $("s_conc").textContent = `${pdfConc} PDF × ${pagesPerPdf} pg = ${pdfConc * pagesPerPdf} max · peak ${peakInFlight}`;
+  $("s_pages").textContent = `${runnable.length} / ${totalPages}`;
+  $("s_wall").textContent = (wall / 1000).toFixed(1) + " s";
+  $("s_tput").textContent = (totalPages / (wall / 1000)).toFixed(2) + " pages/s  ·  " + ((wall / 1000) / totalPages).toFixed(2) + " s/page eff";
+  $("s_lat").textContent = secs(stats(latencies));
+  $("s_pdflat").textContent = pdfWalls.length ? secs(stats(pdfWalls)) : "—";
+  $("s_tok").textContent = `${tokSum} / ${(tokSum / Math.max(1, totalPages - errCount)).toFixed(0)}`;
+  $("s_lc").textContent = `${lcPages} / ${totalPages}`;
+  $("s_err").textContent = errCount;
+  $("s_cost").textContent = "$" + ((wall / 3.6e6) * parseFloat(els.rate.value)).toFixed(4);
+  els.summary.style.display = "table";
+});
+
+// ---- job card DOM ----
+function renderJobCard(job) {
+  const div = document.createElement("div");
+  div.className = "job"; div.id = job.id;
+  div.innerHTML = `
+    <div class="job-head">
+      <span class="job-name">${escapeHtml(job.file.name)}</span>
+      <span class="job-meta"><span class="j-meta">—</span> <span class="badge running j-badge">queued</span></span>
+    </div>
+    <div class="bar-track"><div class="bar-fill j-bar"></div><span class="bar-label j-barlabel">0 / ?</span></div>
+    <div class="job-body"><div class="j-pages"></div></div>`;
+  div.querySelector(".job-head").addEventListener("click", () => div.querySelector(".job-body").classList.toggle("open"));
+  els.jobs.appendChild(div);
+}
+function setBadge(job, cls) {
+  const b = document.querySelector(`#${job.id} .j-badge`);
+  b.className = "badge j-badge " + (cls === "done" ? "done" : cls === "error" ? "error" : "running");
+  b.textContent = cls;
+}
+function updateJobCard(job) {
+  const root = document.getElementById(job.id);
+  const total = job.total || 0;
+  const pct = total ? job.doneCount / total : 0;
+  root.querySelector(".j-bar").style.width = (pct * 100) + "%";
+  root.querySelector(".j-barlabel").textContent =
+    `${job.doneCount} / ${total || "?"}  ·  ${Math.round(pct * 100)}%`;
+  const elapsed = job.startedAt ? ((job.endedAt || performance.now()) - job.startedAt) / 1000 : 0;
+  const renderInfo = total && job.renderedCount < total ? ` · rendered ${job.renderedCount}/${total}` : "";
+  root.querySelector(".j-meta").textContent =
+    `${job.doneCount}/${total || "?"} pg${renderInfo} · ${elapsed.toFixed(1)}s` + (job.errors ? ` · ${job.errors} err` : "");
+  const body = root.querySelector(".j-pages");
+  body.innerHTML = "";
+  job.results.forEach((r, pi) => {
+    if (!r) return;
+    const row = document.createElement("div");
+    row.className = "page-row";
+    if (r.error) {
+      row.innerHTML = `<span>p${pi+1}</span><span class="lc-hi">ERROR</span><span></span><span></span><span class="txt">${escapeHtml(r.error)}</span>`;
+    } else {
+      const lc = (r.lowFrac * 100).toFixed(0) + "%";
+      row.innerHTML =
+        `<span>p${pi+1}</span>` +
+        `<span>${(r.elapsed/1000).toFixed(1)}s</span>` +
+        `<span>${r.nTokens} tok</span>` +
+        `<span class="${r.lowFrac > 0.1 ? "lc-hi" : ""}">lc ${lc}</span>` +
+        `<span class="txt">${escapeHtml(r.text.slice(0, 400))}${r.text.length > 400 ? "…" : ""}</span>`;
+    }
+    body.appendChild(row);
+  });
+}
+</script>
+</body>
+</html>
