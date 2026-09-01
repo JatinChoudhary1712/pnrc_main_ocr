@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PNRC OCR — Backend Test</title>
+<style>
+  :root { --bg:#fff; --fg:#000; --muted:#666; --hover:#f0f0f0; --err:#b00020; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+    font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif; line-height:1.4; }
+  header { border-bottom:2px solid #000; padding:16px 24px; }
+  header h1 { font-size:16px; letter-spacing:.5px; text-transform:uppercase; margin:0; }
+  main { max-width:1000px; margin:0 auto; padding:20px 24px 60px; }
+  .mono { font-family:"SF Mono",ui-monospace,Consolas,monospace; }
+  label { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.5px;
+    color:var(--muted); margin-bottom:4px; }
+  input[type="text"] { width:100%; padding:7px 9px; border:1px solid #000; font-size:13px; }
+  fieldset { border:1px solid #000; margin:0 0 16px; padding:14px 16px 16px; }
+  legend { font-size:11px; text-transform:uppercase; letter-spacing:1px; padding:0 6px; }
+  .grid { display:grid; gap:12px; grid-template-columns:repeat(2,1fr); }
+  @media (max-width:640px){ .grid { grid-template-columns:1fr; } }
+  .dropzone { border:2px dashed #000; padding:22px; text-align:center; cursor:pointer; margin-bottom:12px; }
+  .dropzone.drag { background:var(--hover); }
+  input[type="file"] { display:none; }
+  .filelist { list-style:none; padding:0; margin:0 0 14px; border:1px solid #000; }
+  .filelist:empty { display:none; }
+  .filelist li { display:flex; justify-content:space-between; padding:6px 10px;
+    border-bottom:1px solid #000; font-size:13px; }
+  .filelist li:last-child { border-bottom:none; }
+  .filelist button { background:none; border:none; cursor:pointer; text-decoration:underline; font-size:13px; }
+  .actions { display:flex; gap:10px; margin-bottom:20px; align-items:center; flex-wrap:wrap; }
+  button.primary, button.secondary { padding:10px 18px; border:1px solid #000; background:#000; color:#fff;
+    font-size:13px; text-transform:uppercase; letter-spacing:.5px; cursor:pointer; }
+  button.secondary { background:#fff; color:#000; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  .hint-sm { font-size:11px; color:var(--muted); margin-top:6px; }
+  .job { border:1px solid #000; margin-bottom:12px; }
+  .job-head { display:flex; justify-content:space-between; align-items:center; padding:9px 14px; gap:10px; cursor:pointer; }
+  .job-head:hover { background:var(--hover); }
+  .job-name { font-weight:600; font-size:14px; word-break:break-all; }
+  .job-meta { font-size:12px; color:var(--muted); white-space:nowrap; }
+  .badge { font-size:11px; text-transform:uppercase; letter-spacing:.5px; border:1px solid #000; padding:2px 8px; white-space:nowrap; }
+  .badge.running { color:var(--muted); border-color:var(--muted); }
+  .badge.done { background:#000; color:#fff; }
+  .badge.error { background:var(--err); border-color:var(--err); color:#fff; }
+  .bar-track { height:16px; background:var(--hover); border-top:1px solid #000; border-bottom:1px solid #000; position:relative; }
+  .bar-fill { height:100%; width:0%; background:#000; transition:width .2s ease; }
+  .bar-label { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-size:10px; letter-spacing:.5px; text-transform:uppercase; color:#fff; mix-blend-mode:difference; }
+  .job-body { display:none; border-top:1px solid #000; }
+  .job-body.open { display:block; }
+  table.summary { border-collapse:collapse; width:100%; font-size:12px; }
+  table.summary td { border-bottom:1px solid var(--hover); padding:5px 14px; vertical-align:top; }
+  table.summary td:first-child { text-transform:uppercase; font-size:11px; color:var(--muted); width:120px; white-space:nowrap; }
+  .page-row { display:grid; grid-template-columns:50px 80px 90px 1fr; gap:8px; padding:6px 14px;
+    border-bottom:1px solid var(--hover); font-size:12px; align-items:baseline; }
+  .page-row:last-child { border-bottom:none; }
+  .page-row .txt { font-family:"SF Mono",ui-monospace,Consolas,monospace; white-space:pre-wrap; }
+  .lc-hi { color:var(--err); font-weight:700; }
+</style>
+</head>
+<body>
+<header><h1>PNRC OCR · Backend Test</h1></header>
+<main>
+  <fieldset>
+    <legend>Backend</legend>
+    <div class="grid">
+      <div>
+        <label for="baseUrl">API Base URL</label>
+        <input type="text" id="baseUrl" placeholder="http://127.0.0.1:8080" />
+      </div>
+      <div>
+        <label for="apiKey">X-API-Key</label>
+        <input type="text" id="apiKey" placeholder="matches API_KEY in .env" />
+      </div>
+    </div>
+    <div class="hint-sm">
+      Generation (temperature, top_p, …) and concurrency (OCR_CONCURRENCY, MAX_FILES_PER_BATCH,
+      OCR_PAGE_RETRIES) are server config in <span class="mono">.env</span> — restart the backend to change them.
+    </div>
+  </fieldset>
+
+  <div class="dropzone" id="dropzone">
+    <p><strong>Click to choose PDFs</strong> or drag &amp; drop</p>
+    <input type="file" id="fileInput" accept="application/pdf" multiple />
+  </div>
+  <ul class="filelist" id="fileList"></ul>
+
+  <div class="actions">
+    <button class="primary" id="runBtn" disabled>Send to /process</button>
+    <button class="secondary" id="clearBtn" type="button">Clear</button>
+    <span class="hint-sm" id="status"></span>
+  </div>
+
+  <div id="jobs"></div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const els = {
+  baseUrl:$("baseUrl"), apiKey:$("apiKey"), dropzone:$("dropzone"), fileInput:$("fileInput"),
+  fileList:$("fileList"), runBtn:$("runBtn"), clearBtn:$("clearBtn"), status:$("status"), jobs:$("jobs"),
+};
+
+// ---- config persistence ----
+const CFG = ["baseUrl","apiKey"];
+CFG.forEach(k => {
+  const saved = localStorage.getItem("pnrc_backend_" + k);
+  if (saved !== null) els[k].value = saved;
+  els[k].addEventListener("change", () => localStorage.setItem("pnrc_backend_" + k, els[k].value));
+});
+
+const base = () => els.baseUrl.value.trim().replace(/\/+$/, "");
+const headers = () => els.apiKey.value.trim() ? { "X-API-Key": els.apiKey.value.trim() } : {};
+const esc = (s) => { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; };
+
+// ---- file select ----
+let files = [];
+els.dropzone.addEventListener("click", () => els.fileInput.click());
+els.dropzone.addEventListener("dragover", e => { e.preventDefault(); els.dropzone.classList.add("drag"); });
+els.dropzone.addEventListener("dragleave", () => els.dropzone.classList.remove("drag"));
+els.dropzone.addEventListener("drop", e => {
+  e.preventDefault(); els.dropzone.classList.remove("drag");
+  add(Array.from(e.dataTransfer.files).filter(f => f.type === "application/pdf"));
+});
+els.fileInput.addEventListener("change", () => { add(Array.from(els.fileInput.files)); els.fileInput.value = ""; });
+function add(fs) {
+  for (const f of fs) if (!files.some(x => x.name === f.name && x.size === f.size)) files.push(f);
+  renderFiles();
+}
+function renderFiles() {
+  els.fileList.innerHTML = "";
+  files.forEach((f, i) => {
+    const li = document.createElement("li");
+    li.innerHTML = `<span>${esc(f.name)} <span style="color:var(--muted)">(${(f.size/1024).toFixed(0)} KB)</span></span>`;
+    const b = document.createElement("button");
+    b.textContent = "remove";
+    b.onclick = () => { files.splice(i, 1); renderFiles(); };
+    li.appendChild(b);
+    els.fileList.appendChild(li);
+  });
+  els.runBtn.disabled = files.length === 0;
+}
+els.clearBtn.addEventListener("click", () => { files = []; renderFiles(); els.jobs.innerHTML = ""; els.status.textContent = ""; });
+
+// ---- run ----
+els.runBtn.addEventListener("click", async () => {
+  els.runBtn.disabled = true; els.clearBtn.disabled = true; els.jobs.innerHTML = "";
+  els.status.textContent = "uploading…";
+
+  const fd = new FormData();
+  files.forEach(f => fd.append("files", f, f.name));
+
+  let data;
+  try {
+    const r = await fetch(base() + "/process", { method: "POST", headers: headers(), body: fd });
+    data = await r.json();
+    if (!r.ok) throw new Error(data.detail || ("HTTP " + r.status));
+  } catch (e) {
+    els.status.textContent = "FAIL: " + e.message;
+    els.runBtn.disabled = false; els.clearBtn.disabled = false;
+    return;
+  }
+
+  els.status.textContent = `${data.jobs.length} job(s) queued · polling`;
+  const cards = data.jobs.map(makeCard);
+  await Promise.all(data.jobs.map((j, i) => j.job_id ? poll(j.job_id, cards[i]) : null));
+
+  els.status.textContent = "done";
+  els.runBtn.disabled = false; els.clearBtn.disabled = false;
+});
+
+async function poll(jobId, card) {
+  while (true) {
+    await new Promise(r => setTimeout(r, 1000));
+    let job;
+    try {
+      const r = await fetch(base() + "/process/" + jobId, { headers: headers() });
+      job = await r.json();
+      if (!r.ok) throw new Error(job.detail || ("HTTP " + r.status));
+    } catch (e) {
+      renderCard(card, { status: "error", stage: "poll", error: e.message });
+      return;
+    }
+    renderCard(card, job);
+    if (job.status === "done" || job.status === "error") return;
+  }
+}
+
+// ---- job card ----
+function makeCard(j) {
+  const div = document.createElement("div");
+  div.className = "job";
+  div.innerHTML = `
+    <div class="job-head">
+      <span class="job-name">${esc(j.pdf_name)}</span>
+      <span class="job-meta"><span class="j-meta">—</span> <span class="badge running j-badge">${esc(j.status || "queued")}</span></span>
+    </div>
+    <div class="bar-track"><div class="bar-fill j-bar"></div><span class="bar-label j-barlabel"></span></div>
+    <div class="job-body"><div class="j-detail"></div></div>`;
+  div.querySelector(".job-head").addEventListener("click", () => div.querySelector(".job-body").classList.toggle("open"));
+  els.jobs.appendChild(div);
+  if (j.error) renderCard(div, { status: "error", stage: "upload", error: j.error });
+  return div;
+}
+
+function renderCard(root, job) {
+  const badge = root.querySelector(".j-badge");
+  const cls = job.status === "done" ? "done" : job.status === "error" ? "error" : "running";
+  badge.className = "badge j-badge " + cls;
+  badge.textContent = job.stage || job.status || "—";
+
+  const total = job.pages_total || 0;
+  const done = job.pages_done || 0;
+  const pct = job.status === "done" ? 1 : total ? done / total : 0;
+  root.querySelector(".j-bar").style.width = (pct * 100) + "%";
+  root.querySelector(".j-barlabel").textContent = total ? `${done} / ${total}` : (job.stage || "");
+
+  const m = job.result && job.result.metrics;
+  root.querySelector(".j-meta").textContent = m
+    ? `${m.filled_sheet_count}/${m.sheet_count} filled · ${m.error_page_count} err · ${m.processing_seconds}s`
+    : (job.stage || job.status || "—");
+
+  const detail = root.querySelector(".j-detail");
+  if (job.status === "error") {
+    detail.innerHTML = `<div class="page-row"><span class="lc-hi">ERROR</span><span></span><span></span><span class="txt">${esc(job.error || "")}</span></div>`;
+    return;
+  }
+  if (!job.result) { detail.innerHTML = ""; return; }
+
+  const rows = job.result.pages.map(p => {
+    const conf = p.confidence || {};
+    const flag = p.need_review ? "review" : "";
+    const cellCls = (p.status === "error" || p.need_review) ? "lc-hi" : "";
+    const txt = p.status === "error" ? (p.error || "OCR error") : (p.text || "(empty)");
+    return `<div class="page-row">
+      <span>p${p.page}</span>
+      <span>${esc(p.status)}</span>
+      <span class="${cellCls}">${esc(flag || (conf.is_low_confidence ? "low-conf" : "ok"))}</span>
+      <span class="txt">${esc(String(txt).slice(0, 500))}${String(txt).length > 500 ? "…" : ""}</span>
+    </div>`;
+  }).join("");
+
+  detail.innerHTML = `
+    <table class="summary">
+      <tr><td>pdf_name</td><td class="mono">${esc(job.result.pdf_name)}</td></tr>
+      <tr><td>sheets</td><td class="mono">${m.sheet_count} total · ${m.filled_sheet_count} filled</td></tr>
+      <tr><td>error pages</td><td class="mono">${m.error_page_count}</td></tr>
+      <tr><td>seconds</td><td class="mono">${m.processing_seconds}</td></tr>
+    </table>
+    ${rows}`;
+}
+</script>
+</body>
+</html>

@@ -8,6 +8,7 @@ from src.config import (
     OCR_CONCURRENCY,
     OCR_MAX_TOKENS,
     OCR_MODEL_NAME,
+    OCR_PAGE_RETRIES,
     OCR_PROMPT,
     OCR_REASONING,
     OCR_TEMPERATURE,
@@ -80,15 +81,34 @@ def ocr_page(image_png: bytes):
 
 
 def _ocr_one(item):
-    text, logprobs = ocr_page(item["image_png"])
-    cleaned = clean_repetitions(text).strip()
-    conf = score_page_confidence(logprobs)
+    """OCR one page. Retries any failure OCR_PAGE_RETRIES times, then returns an
+    error page rather than raising so one bad page can't sink the whole job."""
+    last_err = None
+    for _ in range(OCR_PAGE_RETRIES + 1):
+        try:
+            text, logprobs = ocr_page(item["image_png"])
+            cleaned = clean_repetitions(text).strip()
+            conf = score_page_confidence(logprobs)
+            result = {
+                "page": item["page"],
+                "status": "filled",
+                "text": cleaned or None,
+                "confidence": conf,
+                "need_review": conf["is_low_confidence"],
+            }
+            if "pdf_name" in item:
+                result["pdf_name"] = item["pdf_name"]
+            return result
+        except Exception as exc:
+            last_err = exc
+
     result = {
         "page": item["page"],
-        "status": "filled",
-        "text": cleaned or None,
-        "confidence": conf,
-        "need_review": conf["is_low_confidence"],
+        "status": "error",
+        "text": None,
+        "confidence": score_page_confidence(None),
+        "need_review": True,
+        "error": str(last_err),
     }
     if "pdf_name" in item:
         result["pdf_name"] = item["pdf_name"]

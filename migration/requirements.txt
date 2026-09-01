@@ -1,1 +1,1 @@
-fastapi uvicorn python-multipart python-dotenv httpx torch torchvision transformers scikit-learn pymupdf pillow numpy modal
+fastapi uvicorn python-multipart python-dotenv httpx torch torchvision transformers scikit-learn pymupdf pillow numpy

@@ -158,6 +158,28 @@
   </fieldset>
 
   <fieldset>
+    <legend>Sheet classification (DINOv2)</legend>
+    <div class="grid g3">
+      <div>
+        <label for="backendUrl">Backend API URL</label>
+        <input type="text" id="backendUrl" placeholder="http://127.0.0.1:8080" />
+      </div>
+      <div>
+        <label for="backendApiKey">Backend X-API-Key</label>
+        <input type="text" id="backendApiKey" placeholder="matches API_KEY in .env" />
+      </div>
+      <div>
+        <label for="classifyEnabled">skip empty sheets?</label>
+        <select id="classifyEnabled">
+          <option value="1" selected>yes — classify then OCR filled only</option>
+          <option value="0">no — OCR every page</option>
+        </select>
+      </div>
+    </div>
+    <div class="hint-sm">Calls <span class="mono">POST /classify</span> on the FastAPI backend (DINOv2 + knowledge base). Empty pages skip vLLM.</div>
+  </fieldset>
+
+  <fieldset>
     <legend>Generation config</legend>
     <div class="grid g4">
       <div><label for="temperature">temperature</label><input type="number" id="temperature" value="1.0" step="0.05" min="0" /></div>
@@ -215,6 +237,7 @@
   <table class="summary" id="summary" style="display:none">
     <tr><td>Concurrency (in-flight)</td><td class="mono" id="s_conc">—</td></tr>
     <tr><td>PDFs / pages</td><td class="mono" id="s_pages">—</td></tr>
+    <tr><td>Filled / empty sheets</td><td class="mono" id="s_sheets">—</td></tr>
     <tr><td>Total wall time</td><td class="mono" id="s_wall">—</td></tr>
     <tr><td>Throughput</td><td class="mono" id="s_tput">—</td></tr>
     <tr><td>Page latency avg / p50 / p95 / max</td><td class="mono" id="s_lat">—</td></tr>
@@ -242,6 +265,7 @@ const els = {
   runBtn: $("runBtn"), clearBtn: $("clearBtn"), renderStatus: $("renderStatus"),
   totalTimer: $("totalTimer"), statusText: $("statusText"), inflight: $("inflight"),
   summary: $("summary"), jobs: $("jobs"), pingBtn: $("pingBtn"), pingResult: $("pingResult"),
+  backendUrl: $("backendUrl"), backendApiKey: $("backendApiKey"), classifyEnabled: $("classifyEnabled"),
 };
 
 const DEFAULT_PROMPT = `You are an OCR text recognition engine.
@@ -268,7 +292,7 @@ Rules:
 Return only the transcription.`;
 
 // ---- persistence ----
-const CFG_KEYS = ["baseUrl","apiKey","model","temperature","topP","topK","maxTokens","reasoning","dpi","rate","prompt","pdfConcurrency","pagesPerPdf","logprobs"];
+const CFG_KEYS = ["baseUrl","apiKey","model","temperature","topP","topK","maxTokens","reasoning","dpi","rate","prompt","pdfConcurrency","pagesPerPdf","logprobs","backendUrl","backendApiKey","classifyEnabled"];
 function loadCfg() {
   const saved = JSON.parse(localStorage.getItem("ocr_bench_cfg") || "{}");
   CFG_KEYS.forEach(k => { if (saved[k] !== undefined) els[k].value = saved[k]; });
@@ -293,11 +317,27 @@ els.pagesPerPdf.addEventListener("input", updMaxHint);
 updMaxHint();
 
 const baseUrl = () => els.baseUrl.value.trim().replace(/\/+$/, "");
+const backendBase = () => els.backendUrl.value.trim().replace(/\/+$/, "");
 const authHeaders = () => {
   const h = { "Content-Type": "application/json" };
   if (els.apiKey.value.trim()) h["Authorization"] = "Bearer " + els.apiKey.value.trim();
   return h;
 };
+const backendHeaders = () => {
+  const h = {};
+  if (els.backendApiKey.value.trim()) h["X-API-Key"] = els.backendApiKey.value.trim();
+  return h;
+};
+const useClassification = () => els.classifyEnabled.value === "1";
+
+async function classifyPdf(file) {
+  const fd = new FormData();
+  fd.append("file", file, file.name);
+  const r = await fetch(backendBase() + "/classify", { method: "POST", headers: backendHeaders(), body: fd });
+  if (!r.ok) throw new Error("HTTP " + r.status + ": " + (await r.text()).slice(0, 200));
+  const j = await r.json();
+  return j.pages || [];
+}
 
 // ---- ping ----
 els.pingBtn.addEventListener("click", async () => {
@@ -456,12 +496,14 @@ els.runBtn.addEventListener("click", async () => {
   els.renderStatus.textContent = "";
   startTimer();
   const latencies = [], pdfWalls = [];
-  let tokSum = 0, lcPages = 0, errCount = 0, renderedTotal = 0;
+  let tokSum = 0, lcPages = 0, errCount = 0, renderedTotal = 0, emptyPages = 0, filledPages = 0;
+  const classifyOn = useClassification();
   globalInFlight = 0; peakInFlight = 0; showInFlight();
 
   const jobs = files.map((f, ji) => ({
     id: "job" + ji, file: f, total: 0, results: [], doneCount: 0,
-    renderedCount: 0, errors: 0, startedAt: null, endedAt: null, renderError: null,
+    renderedCount: 0, errors: 0, filledCount: 0, emptyCount: 0,
+    predictions: null, startedAt: null, endedAt: null, renderError: null,
   }));
   jobs.forEach(renderJobCard);
 
@@ -481,12 +523,39 @@ els.runBtn.addEventListener("click", async () => {
 
   async function processPdf(job) {
     job.startedAt = performance.now();
+
+    if (classifyOn) {
+      setBadge(job, "classifying"); updateJobCard(job);
+      try {
+        const pages = await classifyPdf(job.file);
+        job.predictions = new Map(pages.map(p => [p.page, p.prediction]));
+        job.filledCount = pages.filter(p => p.prediction === "filled").length;
+        job.emptyCount = pages.filter(p => p.prediction === "empty").length;
+      } catch (e) {
+        job.renderError = "classify: " + (e.message || String(e));
+        setBadge(job, "error"); updateJobCard(job);
+        return;
+      }
+    }
+
     setBadge(job, "rendering"); updateJobCard(job);
 
     let active = 0, settled = 0, renderDone = false, resolveAll;
     const queue = [];
     const allDone = new Promise(r => { resolveAll = r; });
     const checkDone = () => { if (renderDone && settled >= job.total) resolveAll(); };
+    const predictionFor = (pageNum) => {
+      if (!job.predictions) return "filled";
+      return job.predictions.get(pageNum) || "filled";
+    };
+    const markEmpty = (pi) => {
+      job.results[pi] = { empty: true };
+      job.doneCount++;
+      emptyPages++;
+      settled++;
+      updateJobCard(job);
+      checkDone();
+    };
     const pump = () => {
       while (active < pagesPerPdf && queue.length) {
         const { pi, dataUrl } = queue.shift();
@@ -508,6 +577,11 @@ els.runBtn.addEventListener("click", async () => {
         (n, tot, dataUrl) => {
           job.renderedCount = n; renderedTotal++;
           els.renderStatus.textContent = `rendered ${renderedTotal} pages`;
+          if (predictionFor(n) === "empty") {
+            markEmpty(n - 1);
+            return;
+          }
+          filledPages++;
           queue.push({ pi: n - 1, dataUrl });
           pump(); updateJobCard(job);
         });
@@ -531,6 +605,7 @@ els.runBtn.addEventListener("click", async () => {
   const wall = stopTimer();
   const runnable = jobs.filter(j => !j.renderError);
   const totalPages = runnable.reduce((s, j) => s + j.total, 0);
+  const ocrPages = classifyOn ? filledPages : totalPages;
   els.statusText.textContent = "done";
   els.renderStatus.textContent = "";
   els.runBtn.disabled = false; els.clearBtn.disabled = false;
@@ -546,13 +621,18 @@ els.runBtn.addEventListener("click", async () => {
   };
   const secs = (a) => a.map(x => (x / 1000).toFixed(1) + "s").join(" / ");
   $("s_conc").textContent = `${pdfConc} PDF × ${pagesPerPdf} pg = ${pdfConc * pagesPerPdf} max · peak ${peakInFlight}`;
-  $("s_pages").textContent = `${runnable.length} / ${totalPages}`;
+  $("s_pages").textContent = `${runnable.length} PDF · ${totalPages} pages` + (classifyOn ? ` · ${ocrPages} OCR'd` : "");
+  $("s_sheets").textContent = classifyOn
+    ? `${filledPages} filled · ${emptyPages} empty · ${totalPages} total`
+    : `${totalPages} total (classification off)`;
   $("s_wall").textContent = (wall / 1000).toFixed(1) + " s";
-  $("s_tput").textContent = (totalPages / (wall / 1000)).toFixed(2) + " pages/s  ·  " + ((wall / 1000) / totalPages).toFixed(2) + " s/page eff";
-  $("s_lat").textContent = secs(stats(latencies));
+  $("s_tput").textContent = ocrPages
+    ? (ocrPages / (wall / 1000)).toFixed(2) + " filled pages/s  ·  " + ((wall / 1000) / ocrPages).toFixed(2) + " s/filled page eff"
+    : "— (no filled pages)";
+  $("s_lat").textContent = latencies.length ? secs(stats(latencies)) : "—";
   $("s_pdflat").textContent = pdfWalls.length ? secs(stats(pdfWalls)) : "—";
-  $("s_tok").textContent = `${tokSum} / ${(tokSum / Math.max(1, totalPages - errCount)).toFixed(0)}`;
-  $("s_lc").textContent = `${lcPages} / ${totalPages}`;
+  $("s_tok").textContent = `${tokSum} / ${(tokSum / Math.max(1, ocrPages - errCount)).toFixed(0)}`;
+  $("s_lc").textContent = `${lcPages} / ${ocrPages || totalPages}`;
   $("s_err").textContent = errCount;
   $("s_cost").textContent = "$" + ((wall / 3.6e6) * parseFloat(els.rate.value)).toFixed(4);
   els.summary.style.display = "table";
@@ -586,15 +666,18 @@ function updateJobCard(job) {
     `${job.doneCount} / ${total || "?"}  ·  ${Math.round(pct * 100)}%`;
   const elapsed = job.startedAt ? ((job.endedAt || performance.now()) - job.startedAt) / 1000 : 0;
   const renderInfo = total && job.renderedCount < total ? ` · rendered ${job.renderedCount}/${total}` : "";
+  const sheetInfo = job.predictions ? ` · ${job.filledCount}/${total || "?"} filled` : "";
   root.querySelector(".j-meta").textContent =
-    `${job.doneCount}/${total || "?"} pg${renderInfo} · ${elapsed.toFixed(1)}s` + (job.errors ? ` · ${job.errors} err` : "");
+    `${job.doneCount}/${total || "?"} pg${sheetInfo}${renderInfo} · ${elapsed.toFixed(1)}s` + (job.errors ? ` · ${job.errors} err` : "");
   const body = root.querySelector(".j-pages");
   body.innerHTML = "";
   job.results.forEach((r, pi) => {
     if (!r) return;
     const row = document.createElement("div");
     row.className = "page-row";
-    if (r.error) {
+    if (r.empty) {
+      row.innerHTML = `<span>p${pi+1}</span><span>—</span><span>empty</span><span></span><span class="txt" style="color:var(--muted)">(skipped — DINOv2)</span>`;
+    } else if (r.error) {
       row.innerHTML = `<span>p${pi+1}</span><span class="lc-hi">ERROR</span><span></span><span></span><span class="txt">${escapeHtml(r.error)}</span>`;
     } else {
       const lc = (r.lowFrac * 100).toFixed(0) + "%";

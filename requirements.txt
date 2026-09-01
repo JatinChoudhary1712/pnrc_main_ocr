@@ -1,6 +1,5 @@
-fastapi 
-modal 
-numpy 
+fastapi
+numpy
 pillow 
 pymupdf 
 python-dotenv 

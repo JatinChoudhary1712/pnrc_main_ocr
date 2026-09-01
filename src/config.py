@@ -6,15 +6,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / ".env")
 
-## CPU usage limit — cap thread pools so this process leaves headroom on shared servers.
-## Must be set before torch/numpy spin up their thread pools, so this stays above those imports.
-CPU_CORES = int(os.environ.get("CPU_CORES", "12"))
-os.environ.setdefault("OMP_NUM_THREADS", str(CPU_CORES))
-os.environ.setdefault("MKL_NUM_THREADS", str(CPU_CORES))
-os.environ.setdefault("OPENBLAS_NUM_THREADS", str(CPU_CORES))
-os.environ.setdefault("NUMEXPR_NUM_THREADS", str(CPU_CORES))
-os.environ.setdefault("VECLIB_MAXIMUM_THREADS", str(CPU_CORES))
-
 KB_FOLDER = BASE_DIR / "knowledge_base"
 EMBEDDINGS_FILE = KB_FOLDER / "embeddings.npy"
 METADATA_FILE = KB_FOLDER / "metadata.json"
@@ -65,14 +56,8 @@ Return only the transcription.
 """
 
 def get_device():
-    """DINOv2 device: local CUDA when available, otherwise CPU."""
-    import torch
-
-    torch.set_num_threads(CPU_CORES)
-    torch.set_num_interop_threads(CPU_CORES)
-    return "cuda" if torch.cuda.is_available() else "cpu"
-
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    """DINOv2 runs on CPU — the GPU is reserved for the vLLM OCR model."""
+    return "cpu"
 
 ## Classification
 TOP_N = 10
@@ -89,8 +74,8 @@ PDF_DPI = 150
 ## Batching
 MAX_FILES_PER_BATCH = int(os.environ.get("MAX_FILES_PER_BATCH", "8"))
 
-## Container lifecycle
-SCALEDOWN_WINDOW = int(os.environ.get("SCALEDOWN_WINDOW", "15"))
+## Retry one failed page this many extra times before marking it an error page.
+OCR_PAGE_RETRIES = int(os.environ.get("OCR_PAGE_RETRIES", "2"))
 
-## Cost estimation
-L4_HOURLY_RATE = 0.80
+## Completed job JSON is written here as soon as it's ready.
+OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", str(BASE_DIR / "output")))
