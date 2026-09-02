@@ -56,8 +56,11 @@ Return only the transcription.
 """
 
 def get_device():
-    """DINOv2 runs on CPU — the GPU is reserved for the vLLM OCR model."""
-    return "cpu"
+    """DINOv2 on GPU when one is present (~350 MB, shares fine with vLLM),
+    else CPU. CPU classify holds the GIL and stalls the async API."""
+    import torch
+
+    return "cuda" if torch.cuda.is_available() else "cpu"
 
 ## Classification
 TOP_N = 10

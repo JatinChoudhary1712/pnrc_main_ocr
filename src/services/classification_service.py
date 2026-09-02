@@ -34,34 +34,24 @@ def classify_image(image, embeddings=None, metadata=None):
     }
 
 
-def classify_pdf(pdf_bytes):
+def iter_classified_pages(pdf_bytes):
+    """Yield (page_number, result_dict, pixmap) one page at a time so a caller
+    can act on each page the moment it's classified."""
     embeddings, metadata = load_kb()
-
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        for page_number in range(len(doc)):
+            pix = doc[page_number].get_pixmap(dpi=PDF_DPI)
+            image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            yield page_number + 1, classify_image(image, embeddings, metadata), pix
+    finally:
+        doc.close()
 
+
+def classify_pdf(pdf_bytes):
     results = []
     page_images = {}
-
-    for page_number in range(len(doc)):
-        pix = doc[page_number].get_pixmap(dpi=PDF_DPI)
-
-        image = Image.frombytes(
-            "RGB",
-            [pix.width, pix.height],
-            pix.samples,
-        )
-
-        result = classify_image(image, embeddings, metadata)
-
-        page_images[page_number + 1] = pix
-
-        results.append(
-            {
-                "page": page_number + 1,
-                **result,
-            }
-        )
-
-    doc.close()
-
+    for page_number, result, pix in iter_classified_pages(pdf_bytes):
+        page_images[page_number] = pix
+        results.append({"page": page_number, **result})
     return results, page_images

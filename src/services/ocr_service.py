@@ -1,6 +1,5 @@
 import base64
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import httpx
 
@@ -19,6 +18,25 @@ from src.dependencies.vllm_client import vllm_client
 from src.services.confidence_service import score_page_confidence
 from src.utils.text_utils import clean_repetitions
 
+_DEFAULTS = {
+    "temperature": OCR_TEMPERATURE,
+    "top_p": OCR_TOP_P,
+    "top_k": OCR_TOP_K,
+    "max_tokens": OCR_MAX_TOKENS,
+    "reasoning": OCR_REASONING,
+    "concurrency": OCR_CONCURRENCY,
+    "page_retries": OCR_PAGE_RETRIES,
+}
+
+
+def resolve_params(overrides=None):
+    """Merge per-request overrides onto the .env defaults; None/unknown keys ignored."""
+    p = dict(_DEFAULTS)
+    for k, v in (overrides or {}).items():
+        if v is not None and k in p:
+            p[k] = v
+    return p
+
 
 def empty_page_result(page_number):
     conf = score_page_confidence(None)
@@ -31,23 +49,27 @@ def empty_page_result(page_number):
     }
 
 
-def ocr_page(image_png: bytes):
+def ocr_page(image_png: bytes, params=None):
     """OCR one page PNG against the vLLM server. Returns (text, [logprob floats]).
 
     Relies on --reasoning-parser muse_glimmer: the transcription comes back in
     message.content, the model's chain-of-thought in reasoning_content (ignored).
     """
+    p = params or _DEFAULTS
     data_url = "data:image/png;base64," + base64.b64encode(image_png).decode()
     payload = {
         "model": OCR_MODEL_NAME,
-        "temperature": OCR_TEMPERATURE,
-        "top_p": OCR_TOP_P,
-        "top_k": OCR_TOP_K,
-        "max_tokens": OCR_MAX_TOKENS,
+        "temperature": p["temperature"],
+        "top_p": p["top_p"],
+        "top_k": p["top_k"],
+        "max_tokens": p["max_tokens"],
         "logprobs": True,
         "top_logprobs": 1,
+        # muse_glimmer reasoning parser requires special tokens in the stream to
+        # split reasoning_content from content.
+        "skip_special_tokens": False,
         "messages": [
-            {"role": "system", "content": f"Reasoning strength: {OCR_REASONING}"},
+            {"role": "system", "content": f"Reasoning strength: {p['reasoning']}"},
             {
                 "role": "user",
                 "content": [
@@ -80,13 +102,14 @@ def ocr_page(image_png: bytes):
     return text, [e["logprob"] for e in entries]
 
 
-def _ocr_one(item):
-    """OCR one page. Retries any failure OCR_PAGE_RETRIES times, then returns an
+def _ocr_one(item, params=None):
+    """OCR one page. Retries any failure page_retries times, then returns an
     error page rather than raising so one bad page can't sink the whole job."""
+    p = params or _DEFAULTS
     last_err = None
-    for _ in range(OCR_PAGE_RETRIES + 1):
+    for _ in range(p["page_retries"] + 1):
         try:
-            text, logprobs = ocr_page(item["image_png"])
+            text, logprobs = ocr_page(item["image_png"], p)
             cleaned = clean_repetitions(text).strip()
             conf = score_page_confidence(logprobs)
             result = {
@@ -113,21 +136,3 @@ def _ocr_one(item):
     if "pdf_name" in item:
         result["pdf_name"] = item["pdf_name"]
     return result
-
-
-def ocr_image_payloads(pages_payload, on_progress=None):
-    """OCR filled page PNG bytes concurrently against the vLLM server."""
-    total = len(pages_payload)
-    done = 0
-    results = []
-
-    with ThreadPoolExecutor(max_workers=OCR_CONCURRENCY) as pool:
-        futures = [pool.submit(_ocr_one, item) for item in pages_payload]
-        for fut in as_completed(futures):
-            results.append(fut.result())
-            done += 1
-            if on_progress:
-                on_progress(done, total)
-
-    results.sort(key=lambda r: r["page"])
-    return results

@@ -15,7 +15,7 @@
   .mono { font-family:"SF Mono",ui-monospace,Consolas,monospace; }
   label { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.5px;
     color:var(--muted); margin-bottom:4px; }
-  input[type="text"] { width:100%; padding:7px 9px; border:1px solid #000; font-size:13px; }
+  input[type="text"], input[type="number"], select { width:100%; padding:7px 9px; border:1px solid #000; font-size:13px; background:#fff; }
   fieldset { border:1px solid #000; margin:0 0 16px; padding:14px 16px 16px; }
   legend { font-size:11px; text-transform:uppercase; letter-spacing:1px; padding:0 6px; }
   .grid { display:grid; gap:12px; grid-template-columns:repeat(2,1fr); }
@@ -75,10 +75,25 @@
         <input type="text" id="apiKey" placeholder="matches API_KEY in .env" />
       </div>
     </div>
-    <div class="hint-sm">
-      Generation (temperature, top_p, …) and concurrency (OCR_CONCURRENCY, MAX_FILES_PER_BATCH,
-      OCR_PAGE_RETRIES) are server config in <span class="mono">.env</span> — restart the backend to change them.
+  </fieldset>
+
+  <fieldset>
+    <legend>Overrides — blank = server default (.env)</legend>
+    <div class="grid">
+      <div><label for="temperature">temperature</label><input type="number" step="0.05" min="0" id="temperature" placeholder="1.0" /></div>
+      <div><label for="top_p">top_p</label><input type="number" step="0.05" min="0" max="1" id="top_p" placeholder="0.95" /></div>
+      <div><label for="top_k">top_k</label><input type="number" step="1" min="-1" id="top_k" placeholder="64" /></div>
+      <div><label for="max_tokens">max_tokens</label><input type="number" step="128" min="1" id="max_tokens" placeholder="4096" /></div>
+      <div><label for="reasoning">reasoning</label>
+        <select id="reasoning">
+          <option value="">(default)</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option>
+        </select>
+      </div>
+      <div><label for="concurrency">concurrency</label><input type="number" step="1" min="1" id="concurrency" placeholder="12" /></div>
+      <div><label for="page_retries">page_retries</label><input type="number" step="1" min="0" id="page_retries" placeholder="2" /></div>
+      <div><label for="max_files">max_files / request</label><input type="number" step="1" min="1" id="max_files" placeholder="8" /></div>
     </div>
+    <div class="hint-sm">Applied per request — no backend restart needed.</div>
   </fieldset>
 
   <div class="dropzone" id="dropzone">
@@ -98,13 +113,15 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
+const PARAMS = ["temperature","top_p","top_k","max_tokens","reasoning","concurrency","page_retries","max_files"];
 const els = {
   baseUrl:$("baseUrl"), apiKey:$("apiKey"), dropzone:$("dropzone"), fileInput:$("fileInput"),
   fileList:$("fileList"), runBtn:$("runBtn"), clearBtn:$("clearBtn"), status:$("status"), jobs:$("jobs"),
 };
+PARAMS.forEach(k => els[k] = $(k));
 
 // ---- config persistence ----
-const CFG = ["baseUrl","apiKey"];
+const CFG = ["baseUrl","apiKey", ...PARAMS];
 CFG.forEach(k => {
   const saved = localStorage.getItem("pnrc_backend_" + k);
   if (saved !== null) els[k].value = saved;
@@ -151,6 +168,7 @@ els.runBtn.addEventListener("click", async () => {
 
   const fd = new FormData();
   files.forEach(f => fd.append("files", f, f.name));
+  PARAMS.forEach(k => { const v = els[k].value.trim(); if (v !== "") fd.append(k, v); });
 
   let data;
   try {
@@ -227,7 +245,13 @@ function renderCard(root, job) {
     detail.innerHTML = `<div class="page-row"><span class="lc-hi">ERROR</span><span></span><span></span><span class="txt">${esc(job.error || "")}</span></div>`;
     return;
   }
-  if (!job.result) { detail.innerHTML = ""; return; }
+  if (!job.result) {
+    const c = job.classified || [];
+    detail.innerHTML = c.length
+      ? c.map(p => `<div class="page-row"><span>p${p.page}</span><span>${esc(p.prediction)}</span><span></span><span class="txt">classified</span></div>`).join("")
+      : "";
+    return;
+  }
 
   const rows = job.result.pages.map(p => {
     const conf = p.confidence || {};

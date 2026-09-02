@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+.git/
+.github/
+desktop/
+frontend/
+migration/
+*.pdf
+*.png
+*.jpg
+testing.html
+backend_test.html
+uv.lock
+test_ocr_endpoint.py
+.env
+.env.*
