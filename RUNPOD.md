@@ -60,16 +60,37 @@ dies during startup (e.g. OOM — lower `--max-model-len`).
 
 RunPod gives you `https://<pod-id>-8080.proxy.runpod.net`.
 
+**Preferred: one PDF per request (`/upload`).** Each request is small, so a slow
+uplink can't push it past the proxy's request-duration limit, and a client
+retry carrying the same `Idempotency-Key` is de-duplicated instead of starting a
+second OCR job.
+
 ```bash
-curl -H "X-API-Key: $API_KEY" -F "files=@doc.pdf" \
-  https://<pod-id>-8080.proxy.runpod.net/process
-# -> {"jobs":[{"pdf_name":"doc.pdf","job_id":"...","status":"queued"}]}
+curl -H "X-API-Key: $API_KEY" -H "Idempotency-Key: $(sha256sum doc.pdf | cut -c1-64)" \
+  -F "file=@doc.pdf" https://<pod-id>-8080.proxy.runpod.net/upload
+# -> {"job_id":"...","filename":"doc.pdf","status":"queued","idempotency_key":"..."}
 
 curl -H "X-API-Key: $API_KEY" \
   https://<pod-id>-8080.proxy.runpod.net/process/<job_id>
 ```
 
-Or open `backend_test.html` locally and point it at that URL.
+`POST /process` (multi-file, whole batch in one multipart request) still exists
+for `smoke_test.py` / `backend_test.html`, but it is the fragile path on a slow
+link — prefer `/upload`.
+
+`GET /healthz` (no key) and `GET /metrics` (key) expose queue depth, in-flight
+OCR, and job counts.
+
+Open `batch_upload.html` (served over `http://localhost`, not `file://`) for the
+folder-batch UI — it uploads one PDF at a time with configurable concurrency.
+
+### Debugging the proxy
+
+To rule the RunPod HTTPS proxy in or out, add `8080` under the template's
+**"Expose TCP Ports"**, restart, and hit the mapping shown in the pod's Connect
+panel directly: `curl ... http://<pod-ip>:<tcp-port>/upload`. The app binds
+`0.0.0.0:8080` already, so no code change is needed. Don't make production depend
+on this — it's for isolation only.
 
 ## Notes
 

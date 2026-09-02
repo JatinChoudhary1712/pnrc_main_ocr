@@ -82,3 +82,7 @@ OCR_PAGE_RETRIES = int(os.environ.get("OCR_PAGE_RETRIES", "2"))
 
 ## Completed job JSON is written here as soon as it's ready.
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", str(BASE_DIR / "output")))
+
+## Uploaded PDFs are streamed to disk here (one file per job) so a job survives
+## the client disconnecting mid-upload. Deleted once the job finalizes or fails.
+UPLOAD_TMP_DIR = Path(os.environ.get("UPLOAD_TMP_DIR", str(BASE_DIR / "uploads")))

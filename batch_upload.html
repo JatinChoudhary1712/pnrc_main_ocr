@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PNRC OCR — Batch Folder Upload</title>
+<style>
+  :root { --bg:#fff; --fg:#000; --muted:#666; --hover:#f0f0f0; --err:#b00020; --ok:#1a7a3c; --track:#e6e6e6; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+    font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif; line-height:1.4; }
+  header { border-bottom:2px solid #000; padding:16px 24px; }
+  header h1 { font-size:16px; letter-spacing:.5px; text-transform:uppercase; margin:0; }
+  header p { margin:4px 0 0; font-size:12px; color:var(--muted); }
+  main { max-width:1040px; margin:0 auto; padding:20px 24px 80px; }
+  .mono { font-family:"SF Mono",ui-monospace,Consolas,monospace; }
+  label { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.5px;
+    color:var(--muted); margin-bottom:4px; }
+  input[type="text"], input[type="number"], select { width:100%; padding:7px 9px; border:1px solid #000; font-size:13px; background:#fff; }
+  fieldset { border:1px solid #000; margin:0 0 16px; padding:14px 16px 16px; }
+  legend { font-size:11px; text-transform:uppercase; letter-spacing:1px; padding:0 6px; }
+  .grid { display:grid; gap:12px; grid-template-columns:repeat(2,1fr); }
+  .grid3 { display:grid; gap:12px; grid-template-columns:repeat(3,1fr); }
+  .grid4 { display:grid; gap:12px; grid-template-columns:repeat(4,1fr); }
+  @media (max-width:720px){ .grid,.grid3,.grid4 { grid-template-columns:1fr; } }
+  button.primary, button.secondary { padding:10px 18px; border:1px solid #000; background:#000; color:#fff;
+    font-size:13px; text-transform:uppercase; letter-spacing:.5px; cursor:pointer; }
+  button.secondary { background:#fff; color:#000; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  .pick { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
+  .pick .path { font-size:12px; color:var(--muted); word-break:break-all; }
+  .hint-sm { font-size:11px; color:var(--muted); margin-top:6px; }
+  .actions { display:flex; gap:10px; margin:16px 0 8px; align-items:center; flex-wrap:wrap; }
+  .fatal { color:var(--err); font-size:13px; font-weight:600; margin-top:8px; }
+
+  .summary { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:16px 0; }
+  @media (max-width:720px){ .summary { grid-template-columns:repeat(2,1fr); } }
+  .stat { border:1px solid #000; padding:10px 12px; }
+  .stat .k { font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); }
+  .stat .v { font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; margin-top:2px; }
+  .stat .v small { font-size:12px; font-weight:400; color:var(--muted); }
+  .bar-track { height:8px; background:var(--track); margin-top:8px; }
+  .bar-fill { height:100%; width:0%; background:#000; transition:width .2s ease; }
+
+  .filterbar { display:flex; gap:8px; align-items:center; margin-bottom:8px; font-size:12px; flex-wrap:wrap; }
+  .filterbar button { border:1px solid #000; background:#fff; padding:4px 10px; font-size:11px; text-transform:uppercase; letter-spacing:.5px; cursor:pointer; }
+  .filterbar button.on { background:#000; color:#fff; }
+  .pdfs { border:1px solid #000; max-height:480px; overflow:auto; font-size:12px; }
+  .prow { display:grid; grid-template-columns:1fr 140px 90px 80px; gap:8px; padding:6px 12px; border-bottom:1px solid var(--hover); align-items:center; }
+  .prow:last-child { border-bottom:none; }
+  .prow .pname { font-family:"SF Mono",ui-monospace,Consolas,monospace; word-break:break-all; }
+  .prow .pstate { text-transform:uppercase; font-size:10px; letter-spacing:.5px; color:var(--muted); }
+  .prow.s-done .pstate { color:var(--ok); }
+  .prow.s-failed .pstate { color:var(--err); }
+  .prow.s-uploading .pstate, .prow.s-processing .pstate { color:#000; }
+  .prow .pretry { border:1px solid #000; background:#fff; font-size:10px; text-transform:uppercase; padding:2px 6px; cursor:pointer; }
+  .prow .pretry[hidden] { display:none; }
+  .resume { border:1px solid #000; padding:10px 14px; margin-bottom:16px; font-size:13px; background:var(--hover); }
+  .resume button { margin-left:10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>PNRC OCR · Batch Folder Upload</h1>
+  <p>Pick a local folder of PDFs. Each <span class="mono">.pdf</span> is uploaded on its own to <span class="mono">POST /upload</span>
+     (small request, survives a slow link), gets a job id immediately, and is processed in the background. Results save as JSON.</p>
+</header>
+<main>
+  <fieldset>
+    <legend>Backend</legend>
+    <div class="grid">
+      <div>
+        <label for="baseUrl">API Base URL</label>
+        <input type="text" id="baseUrl" placeholder="https://xxxxxxxx-8080.proxy.runpod.net" />
+      </div>
+      <div>
+        <label for="apiKey">X-API-Key</label>
+        <input type="text" id="apiKey" placeholder="matches API_KEY on the pod" />
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>OCR overrides — blank = server default</legend>
+    <div class="grid4">
+      <div><label for="temperature">temperature</label><input type="number" step="0.05" min="0" id="temperature" placeholder="server" /></div>
+      <div><label for="top_p">top_p</label><input type="number" step="0.05" min="0" max="1" id="top_p" placeholder="server" /></div>
+      <div><label for="top_k">top_k</label><input type="number" step="1" min="-1" id="top_k" placeholder="server" /></div>
+      <div><label for="max_tokens">max_tokens</label><input type="number" step="128" min="1" id="max_tokens" placeholder="server" /></div>
+      <div><label for="reasoning">reasoning</label>
+        <select id="reasoning">
+          <option value="">(server)</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option>
+        </select>
+      </div>
+      <div><label for="concurrency">concurrency</label><input type="number" step="1" min="1" id="concurrency" placeholder="server" /></div>
+      <div><label for="page_retries">page_retries (OCR)</label><input type="number" step="1" min="0" id="page_retries" placeholder="server" /></div>
+    </div>
+    <div class="hint-sm"><strong>page_retries</strong> is the backend's per-page OCR retry — unrelated to the upload retry below.</div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Upload settings</legend>
+    <div class="grid3">
+      <div><label for="uploadConcurrency">Upload concurrency (files at once)</label><input type="number" step="1" min="1" max="6" id="uploadConcurrency" value="3" /></div>
+      <div><label for="maxUploadRetries">Max upload retries / file</label><input type="number" step="1" min="0" max="8" id="maxUploadRetries" value="4" /></div>
+      <div><label for="uploadTimeoutSec">Per-file upload timeout (s)</label><input type="number" step="10" min="30" id="uploadTimeoutSec" value="120" /></div>
+    </div>
+    <div class="hint-sm">One request = one PDF. Processing concurrency on the backend is separate and unchanged. A slow file never blocks files already uploaded.
+      Each file carries an <span class="mono">Idempotency-Key</span> so a timed-out retry never creates a duplicate job.</div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Folders</legend>
+    <div class="pick">
+      <button class="secondary" id="pickInputBtn" type="button">Choose input folder</button>
+      <input type="file" id="folderInput" webkitdirectory directory multiple hidden />
+      <span class="path" id="inputPath">No folder selected</span>
+    </div>
+    <div class="pick">
+      <button class="secondary" id="pickOutputBtn" type="button">Choose output folder</button>
+      <button class="secondary" id="useDownloadBtn" type="button">Collect results for download instead</button>
+      <span class="path" id="outputPath">No output selected</span>
+    </div>
+    <div class="pick" id="downloadRow" hidden>
+      <button class="secondary" id="downloadAllBtn" type="button">Download results.json (0)</button>
+      <span class="path">One combined JSON file — no per-file save prompts.</span>
+    </div>
+    <div class="hint-sm" id="fsaNote">Direct folder writes need this page served over <span class="mono">http://localhost</span> (e.g. <span class="mono">python3 -m http.server 9000</span>) — most browsers block them on <span class="mono">file://</span>. Otherwise use "Collect results for download".</div>
+  </fieldset>
+
+  <div class="actions">
+    <button class="primary" id="startBtn" disabled>Start processing</button>
+    <button class="secondary" id="stopBtn" type="button" disabled>Stop</button>
+    <span class="hint-sm" id="status"></span>
+  </div>
+  <div class="fatal" id="fatal" hidden></div>
+
+  <div class="resume" id="resumeBox" hidden></div>
+
+  <div class="summary" id="summary" hidden>
+    <div class="stat"><div class="k">PDF files found</div><div class="v" id="sFound">0</div></div>
+    <div class="stat"><div class="k">Uploaded</div><div class="v" id="sUploaded">0 <small>/ 0</small></div><div class="bar-track"><div class="bar-fill" id="sUploadBar"></div></div></div>
+    <div class="stat"><div class="k">Processed</div><div class="v" id="sProcessed">0 <small>/ 0</small></div><div class="bar-track"><div class="bar-fill" id="sProcessBar"></div></div></div>
+    <div class="stat"><div class="k">Uploading now</div><div class="v" id="sInflight">0</div></div>
+  </div>
+
+  <div id="pdfWrap" hidden>
+    <div class="filterbar">
+      <span class="mono" id="pdfCounts"></span>
+      <button data-f="all" class="on">All</button>
+      <button data-f="active">In progress</button>
+      <button data-f="done">Completed</button>
+      <button data-f="failed">Failed</button>
+    </div>
+    <div class="pdfs" id="pdfs"></div>
+  </div>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const OCR_PARAMS = ["temperature","top_p","top_k","max_tokens","reasoning","concurrency","page_retries"];
+const UP_CFG = ["uploadConcurrency","maxUploadRetries","uploadTimeoutSec"];
+const CFG = ["baseUrl","apiKey", ...OCR_PARAMS, ...UP_CFG];
+const LS_CFG = "pnrc_batch_cfg_";
+const LS_STATE = "pnrc_batch_state";
+const POLL_INTERVAL_MS = 2000;
+const POLL_CONCURRENCY = 6;
+const JOB_STALL_MS = 30 * 60 * 1000;   // give up on a job the backend never finishes
+
+// ---- config persistence ----
+CFG.forEach(k => {
+  const el = $(k);
+  const saved = localStorage.getItem(LS_CFG + k);
+  if (saved !== null && saved !== "") el.value = saved;
+  el.addEventListener("change", () => localStorage.setItem(LS_CFG + k, el.value));
+});
+
+const base = () => $("baseUrl").value.trim().replace(/\/+$/, "");
+const authHeaders = () => { const k = $("apiKey").value.trim(); return k ? { "X-API-Key": k } : {}; };
+const esc = (s) => { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; };
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const nf = (n) => n.toLocaleString();
+const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+
+function ocrParamEntries() {
+  const out = [];
+  for (const k of OCR_PARAMS) { const v = $(k).value.trim(); if (v !== "") out.push([k, v]); }
+  return out;
+}
+const uploadTimeoutMs = () => clamp(parseInt($("uploadTimeoutSec").value, 10) || 120, 30, 3600) * 1000;
+const maxRetries = () => clamp(parseInt($("maxUploadRetries").value, 10) || 0, 0, 8);
+const uploadPool = () => clamp(parseInt($("uploadConcurrency").value, 10) || 1, 1, 6);
+const backoff = (attempt) => Math.min(30000, 1000 * Math.pow(2, attempt - 1));  // 1,2,4,8… cap 30s
+
+// ---------------------------------------------------------------------------
+//  State
+// ---------------------------------------------------------------------------
+let PDFS = [];   // {id,name,file,status,jobId,stage,pagesDone,pagesTotal,error,retryable,upPct,idemNonce,_idem,_uploadDone,_pollStart}
+let outputDirHandle = null;
+let running = false;
+let stopRequested = false;
+let uCursor = 0;
+let inflight = 0;
+let filter = "all";
+const rowEls = new Map();
+
+// ---------------------------------------------------------------------------
+//  Folder selection
+// ---------------------------------------------------------------------------
+$("pickInputBtn").addEventListener("click", () => $("folderInput").click());
+$("folderInput").addEventListener("change", () => {
+  const all = Array.from($("folderInput").files);
+  const pdfFiles = all.filter(f => /\.pdf$/i.test(f.name));   // filter BEFORE queueing
+  const ignored = all.length - pdfFiles.length;
+  const seen = new Set();
+  PDFS = [];
+  pdfFiles
+    .sort((a, b) => (a.webkitRelativePath || a.name).localeCompare(b.webkitRelativePath || b.name, undefined, { numeric: true }))
+    .forEach((f, i) => {
+      const key = f.webkitRelativePath || f.name;
+      if (seen.has(key)) return;
+      seen.add(key);
+      PDFS.push({ id: "p" + i + "_" + Math.random().toString(36).slice(2, 7), name: f.name, file: f,
+        status: "queued", jobId: null, stage: null, pagesDone: 0, pagesTotal: 0,
+        error: null, retryable: false, upPct: 0, idemNonce: 0 });
+    });
+  const root = all.length ? (all[0].webkitRelativePath || "").split("/")[0] : "";
+  $("inputPath").textContent = `${root || "folder"}  —  ${nf(PDFS.length)} PDF file(s)` + (ignored ? `  (${nf(ignored)} non-PDF ignored)` : "");
+  refreshStartEnabled();
+});
+
+const RESULTS = [];
+
+function enterDownloadMode(reason) {
+  outputDirHandle = "download";
+  $("downloadRow").hidden = false;
+  $("outputPath").textContent = "Collecting results into one JSON file" + (reason ? `  (${reason})` : "");
+  refreshStartEnabled();
+}
+$("useDownloadBtn").addEventListener("click", () => enterDownloadMode(""));
+$("downloadAllBtn").addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify(RESULTS, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "pnrc_results.json";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+
+$("pickOutputBtn").addEventListener("click", async () => {
+  if (!window.showDirectoryPicker) { enterDownloadMode("folder-write API unavailable in this browser"); return; }
+  try {
+    const h = await window.showDirectoryPicker({ mode: "readwrite" });
+    let perm = "granted";
+    if (h.requestPermission) perm = await h.requestPermission({ mode: "readwrite" });
+    if (perm !== "granted") { $("outputPath").textContent = "Write permission denied — use download mode"; return; }
+    outputDirHandle = h;
+    $("downloadRow").hidden = true;
+    $("outputPath").textContent = h.name + "  (write access granted)";
+  } catch (e) {
+    if (e && e.name === "AbortError") return;
+    enterDownloadMode((e && e.name || "picker failed") + " — falling back");
+  }
+  refreshStartEnabled();
+});
+if (!window.showDirectoryPicker) {
+  $("fsaNote").textContent = "This browser has no folder-write API; results are collected into one downloadable JSON. Use Edge/Chrome for direct folder writes.";
+}
+
+function refreshStartEnabled() {
+  $("startBtn").disabled = running || PDFS.length === 0 || !outputDirHandle || !base();
+}
+$("baseUrl").addEventListener("input", refreshStartEnabled);
+
+// ---------------------------------------------------------------------------
+//  Start / stop
+// ---------------------------------------------------------------------------
+$("startBtn").addEventListener("click", () => runAll(false));
+$("stopBtn").addEventListener("click", () => {
+  stopRequested = true; $("stopBtn").disabled = true;
+  $("status").textContent = "stopping — letting in-flight uploads and submitted jobs finish…";
+});
+
+function fatal(msg) { const el = $("fatal"); el.hidden = false; el.textContent = msg; }
+
+async function runAll(isRetry) {
+  if (running) return;
+  $("fatal").hidden = true;
+  running = true; stopRequested = false; uCursor = 0;
+  $("startBtn").disabled = true; $("pickInputBtn").disabled = true; $("pickOutputBtn").disabled = true;
+  $("stopBtn").disabled = false;
+  $("summary").hidden = false; $("pdfWrap").hidden = false; $("resumeBox").hidden = true;
+  if (!isRetry) buildPdfRows();
+  renderSummary();
+  $("status").textContent = "running — uploading (" + uploadPool() + " at a time)";
+
+  let uploadsDone = false;
+  const up = runUploads().then(() => { uploadsDone = true; });
+  const poll = pollLoop(() => uploadsDone);
+  await Promise.all([up, poll]);   // two independent pipelines, not a per-file fan-out
+
+  running = false;
+  $("stopBtn").disabled = true;
+  $("pickInputBtn").disabled = false; $("pickOutputBtn").disabled = false;
+  refreshStartEnabled();
+  const done = PDFS.filter(p => p.status === "done").length;
+  const failed = PDFS.filter(p => p.status === "failed").length;
+  $("status").textContent = stopRequested
+    ? `stopped — ${nf(done)} done, ${nf(failed)} failed, ${nf(PDFS.length - done - failed)} not finished`
+    : `finished — ${nf(done)} done, ${nf(failed)} failed`;
+  if (outputDirHandle === "download" && RESULTS.length) $("downloadAllBtn").click();
+  persistState();
+}
+
+// ---------------------------------------------------------------------------
+//  Upload pipeline — one PDF per request, bounded worker pool
+// ---------------------------------------------------------------------------
+async function runUploads() {
+  const n = uploadPool();
+  const worker = async () => {
+    while (running && !stopRequested) {
+      const idx = uCursor++;
+      if (idx >= PDFS.length) return;
+      const p = PDFS[idx];
+      if (p.status !== "queued") continue;
+      await uploadOne(p);
+    }
+  };
+  await Promise.all(Array.from({ length: n }, worker));
+}
+
+async function idemKey(p) {
+  if (p._idem) return p._idem;
+  const raw = `${p.name}|${p.file ? p.file.size : 0}|${p.file ? p.file.lastModified : 0}|${p.idemNonce}`;
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw));
+  p._idem = [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+  return p._idem;
+}
+
+function xhrPost(url, formData, headers, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    for (const [k, v] of Object.entries(headers)) if (v != null) xhr.setRequestHeader(k, v);
+    xhr.timeout = uploadTimeoutMs();
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); };
+    xhr.onload = () => {
+      let body = null;
+      try { body = JSON.parse(xhr.responseText); } catch (_) {}
+      resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, body });
+    };
+    xhr.onerror = () => reject(new Error("network error"));
+    xhr.ontimeout = () => reject(new Error("upload timed out"));
+    xhr.onabort = () => reject(new Error("aborted"));
+    xhr.send(formData);
+  });
+}
+
+async function uploadOne(p) {
+  p.status = "uploading"; p.upPct = 0; touchRow(p);
+  inflight++; renderSummary();
+  const key = await idemKey(p);
+  let attempt = 0;
+  try {
+    while (running && !stopRequested) {
+      attempt++;
+      const fd = new FormData();
+      fd.append("file", p.file, p.name);
+      for (const [k, v] of ocrParamEntries()) fd.append(k, v);
+
+      let res;
+      try {
+        res = await xhrPost(base() + "/upload",
+          fd, { ...authHeaders(), "Idempotency-Key": key },
+          (frac) => { p.upPct = frac; touchRow(p); });
+      } catch (e) {
+        if (attempt > maxRetries()) { failPdf(p, "upload failed: " + e.message, true); return; }
+        await sleep(backoff(attempt));
+        continue;
+      }
+
+      if (res.ok && res.body && res.body.job_id) {
+        p.jobId = res.body.job_id;
+        p.status = "processing";
+        p.stage = res.body.status || "queued";
+        p.error = null; p.retryable = false;
+        p._uploadDone = true;
+        p._pollStart = Date.now();
+        touchRow(p); renderSummary(); persistState();
+        return;
+      }
+
+      const detail = (res.body && (res.body.detail || res.body.error)) || ("HTTP " + res.status);
+      if (res.status === 401 || res.status === 403) {
+        fatal(`Auth rejected (HTTP ${res.status}). Check the X-API-Key. Uploads paused.`);
+        stopRequested = true;
+        failPdf(p, "auth rejected", false);
+        return;
+      }
+      if (res.status === 422) { failPdf(p, String(detail), false); return; }   // empty/invalid file — not retryable
+      if (res.status === 400 || res.status === 413) { failPdf(p, String(detail), true); return; }
+      if (attempt > maxRetries()) { failPdf(p, String(detail), true); return; }
+      await sleep(backoff(attempt));
+    }
+  } finally {
+    inflight--; renderSummary();
+  }
+}
+
+function failPdf(p, msg, retryable) {
+  p.status = "failed"; p.error = msg; p.retryable = !!retryable;
+  touchRow(p); renderSummary(); persistState();
+}
+
+// ---------------------------------------------------------------------------
+//  Poll pipeline — independent of uploads
+// ---------------------------------------------------------------------------
+async function pollLoop(uploadsDone) {
+  while (running) {
+    const active = PDFS.filter(p => p.jobId && p.status === "processing");
+    if (active.length === 0) {
+      if ((uploadsDone() && !hasPendingUpload()) || stopRequested) return;
+      await sleep(POLL_INTERVAL_MS);
+      continue;
+    }
+    await mapLimit(active, POLL_CONCURRENCY, pollOne);
+    renderSummary();
+    await sleep(POLL_INTERVAL_MS);
+  }
+}
+function hasPendingUpload() { return PDFS.some(p => p.status === "queued" || p.status === "uploading"); }
+
+async function pollOne(p) {
+  if (p._pollStart && Date.now() - p._pollStart > JOB_STALL_MS) {
+    failPdf(p, "backend did not finish within 30 min", true); return;
+  }
+  let r, job;
+  try { r = await fetch(base() + "/process/" + p.jobId, { headers: authHeaders() }); }
+  catch (e) { return; }
+  if (r.status === 404) { failPdf(p, "job not found on backend (pod restart?)", true); return; }
+  try { job = await r.json(); } catch (e) { return; }
+  if (!r.ok) return;
+
+  p.stage = job.stage || p.stage;
+  p.pagesDone = job.pages_done || 0;
+  p.pagesTotal = job.pages_total || 0;
+  if (job.status === "done") {
+    p.status = "done"; p.stage = "done";
+    await saveResult(p, job.result);
+  } else if (job.status === "error") {
+    failPdf(p, job.error || "processing error", true);
+    return;
+  }
+  touchRow(p);
+}
+
+async function mapLimit(items, limit, fn) {
+  let i = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (i < items.length) { const idx = i++; await fn(items[idx]); }
+  });
+  await Promise.all(workers);
+}
+
+// ---------------------------------------------------------------------------
+//  Save a result JSON:  input\NAME.pdf  ->  output\NAME.json
+// ---------------------------------------------------------------------------
+async function saveResult(p, result) {
+  const payload = result ?? { pdf_name: p.name, note: "no result body" };
+  try {
+    if (outputDirHandle && outputDirHandle !== "download") {
+      const jsonName = p.name.replace(/\.pdf$/i, "") + ".json";
+      const fh = await outputDirHandle.getFileHandle(jsonName, { create: true });
+      const w = await fh.createWritable();
+      await w.write(JSON.stringify(payload, null, 2));
+      await w.close();
+    } else {
+      RESULTS.push({ pdf_name: p.name, ...payload });
+      $("downloadAllBtn").textContent = `Download results.json (${RESULTS.length})`;
+    }
+    p._saved = true;
+  } catch (e) {
+    p.error = "result received but save failed: " + (e && e.message);
+    p.retryable = true;
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  Rendering
+// ---------------------------------------------------------------------------
+function buildPdfRows() {
+  const wrap = $("pdfs");
+  wrap.innerHTML = "";
+  rowEls.clear();
+  const frag = document.createDocumentFragment();
+  for (const p of PDFS) {
+    const row = document.createElement("div");
+    row.className = "prow s-" + p.status;
+    row.innerHTML = `<span class="pname">${esc(p.name)}</span>
+      <span class="pstate"></span>
+      <span class="mono pprog"></span>
+      <button class="pretry" hidden>Retry</button>`;
+    row.querySelector(".pretry").addEventListener("click", () => retryOne(p));
+    frag.appendChild(row);
+    rowEls.set(p.id, row);
+  }
+  wrap.appendChild(frag);
+  PDFS.forEach(touchRow);
+  applyFilter();
+}
+
+function touchRow(p) {
+  const row = rowEls.get(p.id);
+  if (!row) return;
+  row.className = "prow s-" + p.status;
+  const stateTxt = {
+    queued: "⏳ Queued",
+    uploading: `⟳ Uploading ${Math.round((p.upPct || 0) * 100)}%`,
+    processing: stageLabel(p),
+    done: "✓ Completed",
+    failed: "✗ Failed",
+  }[p.status] || p.status;
+  const st = row.querySelector(".pstate");
+  st.textContent = stateTxt;
+  st.title = p.error || "";
+  row.querySelector(".pprog").textContent =
+    p.status === "processing" && p.pagesTotal ? `${p.pagesDone}/${p.pagesTotal}` : "";
+  row.querySelector(".pretry").hidden = !(p.status === "failed" && p.retryable && !running);
+  row.style.display = currentFilterHides(p) ? "none" : "";
+}
+
+function stageLabel(p) {
+  if (p.stage === "classifying") return "⟳ Classifying";
+  if (p.stage === "ocr") return p.pagesTotal ? `⟳ OCR ${Math.round((p.pagesDone / p.pagesTotal) * 100)}%` : "⟳ OCR";
+  if (p.stage === "queued" || p.stage === "running") return "⏳ Queued (backend)";
+  return "⟳ Processing";
+}
+
+function renderSummary() {
+  const found = PDFS.length;
+  const uploaded = PDFS.filter(p => p._uploadDone || p.jobId || p.status === "failed").length;
+  const processed = PDFS.filter(p => p.status === "done" || p.status === "failed").length;
+  $("sFound").textContent = nf(found);
+  $("sUploaded").innerHTML = `${nf(uploaded)} <small>/ ${nf(found)}</small>`;
+  $("sProcessed").innerHTML = `${nf(processed)} <small>/ ${nf(found)}</small>`;
+  $("sInflight").textContent = nf(inflight);
+  $("sUploadBar").style.width = found ? (uploaded / found * 100) + "%" : "0%";
+  $("sProcessBar").style.width = found ? (processed / found * 100) + "%" : "0%";
+  const done = PDFS.filter(p => p.status === "done").length;
+  const failed = PDFS.filter(p => p.status === "failed").length;
+  $("pdfCounts").textContent = `${nf(done)} done · ${nf(failed)} failed · ${nf(found - done - failed)} in progress`;
+}
+
+document.querySelector(".filterbar").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-f]");
+  if (!b) return;
+  filter = b.dataset.f;
+  document.querySelectorAll(".filterbar button").forEach(x => x.classList.toggle("on", x === b));
+  applyFilter();
+});
+function currentFilterHides(p) {
+  if (filter === "all") return false;
+  if (filter === "active") return !(p.status === "queued" || p.status === "uploading" || p.status === "processing");
+  if (filter === "done") return p.status !== "done";
+  if (filter === "failed") return p.status !== "failed";
+  return false;
+}
+function applyFilter() { PDFS.forEach(p => { const r = rowEls.get(p.id); if (r) r.style.display = currentFilterHides(p) ? "none" : ""; }); }
+
+// ---------------------------------------------------------------------------
+//  Manual retry — re-queue just this PDF.
+//   * upload never succeeded  -> reuse the same idempotency key (harmless).
+//   * job existed but errored -> bump the nonce so a NEW job is created.
+// ---------------------------------------------------------------------------
+function retryOne(p) {
+  if (running) return;
+  if (p.jobId) { p.idemNonce++; p._idem = null; }   // force a fresh job for an OCR-level failure
+  p.status = "queued"; p.jobId = null; p.stage = null; p.error = null;
+  p.retryable = false; p.upPct = 0; p._uploadDone = false; p._pollStart = null;
+  touchRow(p);
+  uCursor = 0;
+  runAll(true);
+}
+
+// ---------------------------------------------------------------------------
+//  Crash-resilience: snapshot the job list so a reload can resume polling.
+// ---------------------------------------------------------------------------
+function persistState() {
+  try {
+    localStorage.setItem(LS_STATE, JSON.stringify({
+      ts: Date.now(), base: base(),
+      pdfs: PDFS.filter(p => p.jobId || p.status === "failed").map(p => ({
+        name: p.name, jobId: p.jobId, status: p.status, stage: p.stage,
+        pagesDone: p.pagesDone, pagesTotal: p.pagesTotal, error: p.error,
+      })),
+    }));
+  } catch (_) {}
+}
+
+(function offerResume() {
+  let snap;
+  try { snap = JSON.parse(localStorage.getItem(LS_STATE) || "null"); } catch (_) {}
+  if (!snap || !snap.pdfs || !snap.pdfs.length) return;
+  const unfinished = snap.pdfs.filter(p => p.jobId && p.status === "processing").length;
+  const box = $("resumeBox");
+  box.hidden = false;
+  box.innerHTML = `Previous run from ${new Date(snap.ts).toLocaleString()}: `
+    + `${nf(snap.pdfs.length)} tracked, ${nf(unfinished)} still processing.`
+    + (unfinished ? ` <button class="secondary" id="resumeBtn" type="button">Resume polling</button>` : "")
+    + ` <button class="secondary" id="discardBtn" type="button">Discard</button>`;
+  $("discardBtn").addEventListener("click", () => { localStorage.removeItem(LS_STATE); box.hidden = true; });
+  const rb = $("resumeBtn");
+  if (rb) rb.addEventListener("click", async () => {
+    if (!base()) { alert("Set the API Base URL first."); return; }
+    if (!outputDirHandle) { alert("Choose an output folder first so resumed results can be saved."); return; }
+    PDFS = snap.pdfs.map((p, i) => ({
+      id: "r" + i, name: p.name, file: null,
+      status: p.status === "done" ? "done" : (p.jobId ? "processing" : "failed"),
+      jobId: p.jobId, stage: p.stage, pagesDone: p.pagesDone || 0, pagesTotal: p.pagesTotal || 0,
+      error: p.error, retryable: !p.jobId, upPct: 0, idemNonce: 0, _uploadDone: true, _pollStart: Date.now(),
+    }));
+    box.hidden = true;
+    $("summary").hidden = false; $("pdfWrap").hidden = false;
+    buildPdfRows(); renderSummary();
+    running = true; stopRequested = false;
+    $("stopBtn").disabled = false;
+    $("status").textContent = "resumed — polling previous jobs";
+    await pollLoop(() => true);
+    running = false;
+    $("stopBtn").disabled = true;
+    $("status").textContent = "resume finished";
+    persistState();
+  });
+})();
+</script>
+</body>
+</html>

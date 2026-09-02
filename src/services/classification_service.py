@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import fitz
 import numpy as np
 from PIL import Image
@@ -34,11 +36,19 @@ def classify_image(image, embeddings=None, metadata=None):
     }
 
 
-def iter_classified_pages(pdf_bytes):
+def iter_classified_pages(pdf):
     """Yield (page_number, result_dict, pixmap) one page at a time so a caller
-    can act on each page the moment it's classified."""
+    can act on each page the moment it's classified.
+
+    `pdf` is either raw PDF bytes or a filesystem path (str/Path) to a PDF —
+    passing a path lets PyMuPDF read the file directly instead of holding the
+    whole document in memory.
+    """
     embeddings, metadata = load_kb()
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    if isinstance(pdf, (str, Path)):
+        doc = fitz.open(pdf)
+    else:
+        doc = fitz.open(stream=pdf, filetype="pdf")
     try:
         for page_number in range(len(doc)):
             pix = doc[page_number].get_pixmap(dpi=PDF_DPI)
